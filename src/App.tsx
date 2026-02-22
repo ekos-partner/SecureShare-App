@@ -20,8 +20,6 @@ import {
   ShieldAlert,
   Info,
   X,
-  Sun,
-  Moon,
   EyeOff
 } from 'lucide-react';
 import { encryptSecret, decryptSecret, hashPassword } from './lib/crypto';
@@ -150,7 +148,7 @@ export default function App() {
         } else if (path === '/' || path === '') {
           setView('create');
         }
-      } catch (e) {
+      } catch {
         // Fallback to create view if location is restricted
         setView('create');
       }
@@ -179,8 +177,12 @@ export default function App() {
       setViewHasPassword(data.hasPassword);
       setViewSalt(data.salt || '');
       setView('view');
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError('An unknown error occurred');
+      }
       setView('error');
     } finally {
       setLoading(false);
@@ -226,15 +228,19 @@ export default function App() {
         origin = (window.location.origin && window.location.origin !== 'null') 
           ? window.location.origin 
           : (window.location.protocol + '//' + window.location.host);
-      } catch (e) {
+      } catch {
         origin = window.location.protocol + '//' + window.location.host;
       }
       
       const link = `${origin}/s/${id}#${key}`;
       setGeneratedLink(link);
       setView('success');
-    } catch (err: any) {
-      setError(err.message);
+    } catch (err: unknown) {
+      if (err instanceof Error) {
+        setError(err.message);
+      } else {
+        setError('An unknown error occurred');
+      }
     } finally {
       setLoading(false);
     }
@@ -268,8 +274,12 @@ export default function App() {
       setIsBurned(data.burned);
       setRemainingViews(data.remaining);
       setDecryptedSecret(decrypted);
-    } catch (err: any) {
-      setError(err.message || 'Invalid password or corrupted data.');
+    } catch (err: unknown) {
+      if (err instanceof Error) {
+        setError(err.message || 'Invalid password or corrupted data.');
+      } else {
+        setError('Invalid password or corrupted data.');
+      }
     }
   };
 
@@ -299,7 +309,7 @@ export default function App() {
         document.execCommand('copy');
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
-      } catch (e) {
+      } catch {
         setError("Could not copy to clipboard. Please select and copy manually.");
       }
       textArea.remove();
@@ -336,7 +346,7 @@ export default function App() {
           URL.revokeObjectURL(url);
         }
       }
-    } catch (e) {
+    } catch {
       setError("Could not download QR code due to browser security restrictions.");
     }
   };
