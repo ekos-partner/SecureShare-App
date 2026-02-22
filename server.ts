@@ -151,6 +151,17 @@ async function startServer() {
   const app = express();
   const PORT = 3000;
 
+  // Disable X-Powered-By to prevent technology fingerprinting (Proxy Disclosure)
+  app.disable('x-powered-by');
+
+  // Disable TRACE method (Proxy Disclosure)
+  app.use((req, res, next) => {
+    if (req.method === 'TRACE') {
+      return res.status(405).send('Method Not Allowed');
+    }
+    next();
+  });
+
   // Trust proxy is required for rate limiting and secure cookies to work behind Nginx/Cloud Run
   app.set('trust proxy', 1);
 
@@ -170,10 +181,14 @@ async function startServer() {
         defaultSrc: ["'self'"],
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         scriptSrc: ["'self'", (req, res) => `'nonce-${(res as any).locals.nonce}'`],
-        styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+        // Added nonce to styleSrc to address "CSP: style-src unsafe-inline"
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        styleSrc: ["'self'", (req, res) => `'nonce-${(res as any).locals.nonce}'`, "https://fonts.googleapis.com"],
         fontSrc: ["'self'", "https://fonts.gstatic.com"],
-        imgSrc: ["'self'", "data:", "https://picsum.photos", "blob:", "https://*.aistudio.google.com"],
-        connectSrc: ["'self'", "https://*", "wss://*"],
+        imgSrc: ["'self'", "data:", "https://picsum.photos", "blob:"],
+        // Tightened connectSrc to address "CSP: Wildcard Directive"
+        connectSrc: ["'self'"],
+        // frameAncestors must allow Google domains for the AI Studio preview to function
         frameAncestors: ["'self'", "https://*.google.com", "https://*.run.app", "https://*.aistudio.google.com"],
       },
     },
@@ -194,14 +209,16 @@ async function startServer() {
     next();
   });
 
-  // Restricted CORS: Only allow same-origin or specific APP_URL if defined
-  // This fixes the "Cross-Domain Misconfiguration" (Access-Control-Allow-Origin: *)
-  const allowedOrigin = process.env.APP_URL || true; 
-  app.use(cors({
-    origin: allowedOrigin,
-    methods: ["GET", "POST"],
-    credentials: true
-  }));
+  // Restricted CORS: Only allow specific APP_URL if defined, otherwise same-origin only
+  // This fixes the "Cross-Domain Misconfiguration"
+  const allowedOrigin = process.env.APP_URL || false; 
+  if (allowedOrigin) {
+    app.use(cors({
+      origin: allowedOrigin,
+      methods: ["GET", "POST"],
+      credentials: true
+    }));
+  }
   app.use(express.json({ limit: '1.1mb' }));
 
   /**
