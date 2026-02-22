@@ -2,15 +2,12 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import App from './App';
 
+import { webcrypto } from 'node:crypto';
+
 // Mock crypto API for testing
 Object.defineProperty(global, 'crypto', {
   value: {
-    getRandomValues: (arr: Uint8Array) => {
-      for (let i = 0; i < arr.length; i++) {
-        arr[i] = Math.floor(Math.random() * 256);
-      }
-      return arr;
-    },
+    getRandomValues: (arr: Uint8Array) => webcrypto.getRandomValues(arr),
     subtle: {
       generateKey: vi.fn(),
       exportKey: vi.fn(),
