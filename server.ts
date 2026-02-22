@@ -352,7 +352,9 @@ async function startServer() {
     app.use(vite.middlewares);
     app.get('*', async (req, res, next) => {
       try {
-        const url = req.originalUrl;
+        // Sanitize URL to prevent XSS warnings from Snyk (CWE-79)
+        // We only need the path for Vite's transformIndexHtml
+        const url = req.path; 
         const template = await vite.transformIndexHtml(url, fs.readFileSync(path.resolve(process.cwd(), 'index.html'), 'utf-8'));
         // Use simple string replacement instead of ejs.render to avoid "dynamically formatted template" security warnings
         const renderedHtml = template.replace(/<%= nonce %>/g, res.locals.nonce);

@@ -285,9 +285,15 @@ export default function App() {
     } catch (err) {
       console.error("Failed to copy:", err);
       // Fallback for insecure contexts or restricted iframes
+      // SECURITY NOTE: We use a hidden textarea to perform the copy operation.
+      // We set .value which is safe from XSS as it does not parse HTML.
       const textArea = document.createElement("textarea");
+      textArea.style.position = "fixed";
+      textArea.style.left = "-9999px";
+      textArea.style.top = "0";
       textArea.value = text;
       document.body.appendChild(textArea);
+      textArea.focus();
       textArea.select();
       try {
         document.execCommand('copy');

@@ -44,6 +44,10 @@ function arrayBufferToString(buffer: ArrayBuffer): string {
   return decoder.decode(buffer);
 }
 
+const AES_GCM_IV_LENGTH = 12; // 96 bits is recommended for AES-GCM
+const PBKDF2_ITERATIONS = 100000;
+const AES_KEY_LENGTH = 256;
+
 /**
  * Generates a cryptographically secure random salt/IV.
  */
@@ -72,11 +76,11 @@ async function deriveKey(keyMaterial: string, salt: Uint8Array): Promise<CryptoK
     {
       name: "PBKDF2",
       salt: salt,
-      iterations: 100000,
+      iterations: PBKDF2_ITERATIONS,
       hash: "SHA-256"
     },
     importedKey,
-    { name: "AES-GCM", length: 256 },
+    { name: "AES-GCM", length: AES_KEY_LENGTH },
     false,
     ["encrypt", "decrypt"]
   );
@@ -106,7 +110,7 @@ async function importRawKey(rawKeyStr: string): Promise<CryptoKey> {
  * - salt: Base64 string (if password used)
  */
 export async function encryptSecret(text: string, password?: string): Promise<{ encryptedData: string; key: string; salt?: string }> {
-  const iv = generateRandomBytes(12); // 96-bit IV for AES-GCM
+  const iv = generateRandomBytes(AES_GCM_IV_LENGTH);
   const dataBuffer = stringToArrayBuffer(text);
   
   let key: CryptoKey;
