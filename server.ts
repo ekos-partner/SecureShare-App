@@ -392,6 +392,21 @@ Policy: https://${req.hostname}/security-policy
     res.type('text/plain').send(securityTxt);
   });
 
+  app.get("/security-policy", (req, res) => {
+    res.type('text/plain').send(`# Security Policy
+
+1. Reporting
+   Please report vulnerabilities via GitHub's "Report a vulnerability" feature in the Security tab.
+   Do not open public issues for security flaws.
+
+2. Supported Versions
+   Only the latest deployment is supported.
+
+3. Response
+   We aim to respond within 48 hours.
+`);
+  });
+
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });

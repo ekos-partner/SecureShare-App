@@ -1,12 +1,14 @@
 # 🛡️ SecureShare - Security Architecture
 
+![SecureShare Screenshot](screenshot.png)
+
 SecureShare is a high-security, zero-knowledge platform for sharing sensitive information. It is designed with a "Privacy by Design" approach, ensuring that even the server hosting the data cannot access the content.
 
 ## 🔐 Core Security Principles
 
 ### 1. End-to-End Encryption (E2EE)
 All encryption and decryption happen exclusively in the user's browser.
-- **Algorithm**: AES-256-CBC.
+- **Algorithm**: AES-256-GCM (Authenticated Encryption).
 - **Key Storage**: The unique decryption key is generated on the client and stored in the URL fragment (the part after the `#`). 
 - **Zero-Knowledge**: Per W3C standards, the URL fragment is **never sent to the server**. Our infrastructure only sees the encrypted blob, never the key.
 
@@ -63,7 +65,7 @@ npm run dev
 - **Frontend**: React 19, Tailwind CSS 4, Motion.
 - **Backend**: Node.js (Express) with `helmet` and `express-rate-limit`.
 - **Database**: SQLite with indexed TTL (Time-To-Live) for high-performance automated cleanup.
-- **Encryption**: CryptoJS (AES-256, PBKDF2, SHA-256).
+- **Encryption**: Web Crypto API (AES-256-GCM, PBKDF2, SHA-256).
 
 ## 📋 Compliance & Standards
 - **RFC 9116**: `security.txt` is implemented at `/.well-known/security.txt`.
