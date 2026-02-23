@@ -14,7 +14,6 @@
     "start:prod": "NODE_ENV=production tsx server.ts"
   },
   "dependencies": {
-    "@google/genai": "^1.29.0",
     "@types/uuid": "^10.0.0",
     "better-sqlite3": "^12.4.1",
     "clsx": "^2.1.1",

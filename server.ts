@@ -187,13 +187,12 @@ app.use(helmet({
     directives: {
       defaultSrc: ["'self'"],
       scriptSrc: ["'self'", (req, res) => `'nonce-${res.locals.nonce}'`],
-      // Restored 'unsafe-inline' for styles as many React/Motion components require it
+      // Allow inline styles for React/Motion
       styleSrc: ["'self'", "'unsafe-inline'", (req, res) => `'nonce-${res.locals.nonce}'`, "https://fonts.googleapis.com"],
       fontSrc: ["'self'", "https://fonts.gstatic.com"],
       imgSrc: ["'self'", "data:", "https://picsum.photos", "blob:"],
-      // Tightened connectSrc to address "CSP: Wildcard Directive"
+      // Restrict connectSrc
       connectSrc: ["'self'"],
-      // frameAncestors must allow Google domains for the AI Studio preview to function
       frameAncestors: ["'self'", "https://*.google.com", "https://*.run.app"],
     },
   },
@@ -214,8 +213,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// Restricted CORS: Only allow specific APP_URL if defined, otherwise same-origin only
-// This fixes the "Cross-Domain Misconfiguration"
+// CORS Configuration
 const allowedOrigin = process.env.APP_URL || false; 
 if (allowedOrigin) {
   app.use(cors({
@@ -422,11 +420,10 @@ const startServer = async () => {
     app.use(vite.middlewares);
     app.get('*', async (req, res, next) => {
       try {
-        // Sanitize URL to prevent XSS warnings from Snyk (CWE-79)
-        // We only need the path for Vite's transformIndexHtml
+        // Sanitize URL
         const url = req.path; 
         const template = await vite.transformIndexHtml(url, fs.readFileSync(path.resolve(process.cwd(), 'index.html'), 'utf-8'));
-        // Use simple string replacement instead of ejs.render to avoid "dynamically formatted template" security warnings
+        // Inject nonce
         const renderedHtml = template.replaceAll('<%= nonce %>', res.locals.nonce);
         res.status(200).set({ 'Content-Type': 'text/html' }).end(renderedHtml);
       } catch (e) {
@@ -475,4 +472,5 @@ Policy: https://${req.hostname}/security-policy
   });
 };
 
+// Start server
 startServer().catch(console.error);
