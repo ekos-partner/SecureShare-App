@@ -14,7 +14,6 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"time"
 
 	"golang.org/x/crypto/pbkdf2"
 )
