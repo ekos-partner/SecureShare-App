@@ -44,8 +44,8 @@ const getDatabase = () => {
       const tmpDbPath = path.join(tmpDir, 'secrets.db');
       console.warn(`Failed to open database at ${dbPath}, using secure temporary database at ${tmpDbPath}`);
       return new Database(tmpDbPath);
-    } catch (tmpErr) {
-      console.error('Failed to create temporary database:', tmpErr);
+    } catch (error) {
+      console.error('Failed to create temporary database:', error);
       throw err;
     }
   }
@@ -98,8 +98,8 @@ const CreateSecretSchema = z.object({
   encryptedData: z.string().min(1).max(1024 * 1024), // Max 1MB payload
   passwordHash: z.string().nullable().optional(),
   salt: z.string().nullable().optional(),
-  expirationHours: z.union([z.string(), z.number()]).transform(v => Number(v)),
-  viewLimit: z.union([z.string(), z.number()]).transform(v => Number(v)),
+  expirationHours: z.union([z.string(), z.number()]).transform(Number),
+  viewLimit: z.union([z.string(), z.number()]).transform(Number),
 });
 
 const BurnSecretSchema = z.object({
@@ -186,11 +186,9 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      scriptSrc: ["'self'", (req, res) => `'nonce-${(res as any).locals.nonce}'`],
+      scriptSrc: ["'self'", (req, res) => `'nonce-${(res as express.Response).locals.nonce}'`],
       // Restored 'unsafe-inline' for styles as many React/Motion components require it
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      styleSrc: ["'self'", "'unsafe-inline'", (req, res) => `'nonce-${(res as any).locals.nonce}'`, "https://fonts.googleapis.com"],
+      styleSrc: ["'self'", "'unsafe-inline'", (req, res) => `'nonce-${(res as express.Response).locals.nonce}'`, "https://fonts.googleapis.com"],
       fontSrc: ["'self'", "https://fonts.gstatic.com"],
       imgSrc: ["'self'", "data:", "https://picsum.photos", "blob:"],
       // Tightened connectSrc to address "CSP: Wildcard Directive"
@@ -398,30 +396,7 @@ setInterval(() => {
 /**
  * STATIC FILE SERVING & VITE INTEGRATION
  */
-if (process.env.NODE_ENV !== "production") {
-  // Development mode: Use Vite middleware and EJS for nonce injection
-  const { createServer: createViteServer } = await import("vite");
-  const vite = await createViteServer({
-    server: { middlewareMode: true },
-    appType: "spa",
-  });
-  app.use(vite.middlewares);
-  app.get('*', async (req, res, next) => {
-    try {
-      // Sanitize URL to prevent XSS warnings from Snyk (CWE-79)
-      // We only need the path for Vite's transformIndexHtml
-      const url = req.path; 
-      const template = await vite.transformIndexHtml(url, fs.readFileSync(path.resolve(process.cwd(), 'index.html'), 'utf-8'));
-      // Use simple string replacement instead of ejs.render to avoid "dynamically formatted template" security warnings
-      const renderedHtml = template.replace(/<%= nonce %>/g, res.locals.nonce);
-      res.status(200).set({ 'Content-Type': 'text/html' }).end(renderedHtml);
-    } catch (e) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      vite.ssrFixStacktrace(e as any);
-      next(e);
-    }
-  });
-} else {
+if (process.env.NODE_ENV === "production") {
   // Production mode: Serve pre-built static files from /dist
   const distPath = path.resolve(process.cwd(), "dist");
   if (fs.existsSync(distPath)) {
@@ -436,6 +411,29 @@ if (process.env.NODE_ENV !== "production") {
   } else {
     console.warn("Production build 'dist' folder not found. Static files will not be served.");
   }
+} else {
+  // Development mode: Use Vite middleware and EJS for nonce injection
+  const { createServer: createViteServer } = await import("vite");
+  const vite = await createViteServer({
+    server: { middlewareMode: true },
+    appType: "spa",
+  });
+  app.use(vite.middlewares);
+  app.get('*', async (req, res, next) => {
+    try {
+      // Sanitize URL to prevent XSS warnings from Snyk (CWE-79)
+      // We only need the path for Vite's transformIndexHtml
+      const url = req.path; 
+      const template = await vite.transformIndexHtml(url, fs.readFileSync(path.resolve(process.cwd(), 'index.html'), 'utf-8'));
+      // Use simple string replacement instead of ejs.render to avoid "dynamically formatted template" security warnings
+      const renderedHtml = template.replaceAll('<%= nonce %>', res.locals.nonce);
+      res.status(200).set({ 'Content-Type': 'text/html' }).end(renderedHtml);
+    } catch (e) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      vite.ssrFixStacktrace(e as any);
+      next(e);
+    }
+  });
 }
 
 // Security.txt implementation (RFC 9116)
