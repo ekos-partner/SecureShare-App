@@ -97,9 +97,9 @@ func main() {
 		encryptionKey = pbkdf2.Key([]byte(combinedSecret), salt, iterations, keySize, sha256.New)
 
 		// Generate password hash for server verification
-		// Hash(password + salt)
-		pwHash := sha256.Sum256([]byte(*password + *saltBase64))
-		ph := base64.StdEncoding.EncodeToString(pwHash[:])
+		// Use PBKDF2 instead of SHA-256 to satisfy CodeQL and improve security
+		pwHash := pbkdf2.Key([]byte(*password), salt, iterations, 32, sha256.New)
+		ph := base64.StdEncoding.EncodeToString(pwHash)
 		passwordHashBase64 = &ph
 	} else {
 		encryptionKey = key
