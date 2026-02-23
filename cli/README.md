@@ -22,13 +22,9 @@ A command-line interface for SecureShare, written in Go. This tool allows you to
     cd cli
     ```
 
-2.  Initialize dependencies:
+2.  Initialize dependencies and build:
     ```bash
     go mod tidy
-    ```
-
-3.  Build the binary:
-    ```bash
     go build -o secureshare-cli main.go
     ```
 
@@ -38,6 +34,7 @@ You can build binaries for other platforms from your current machine (e.g., macO
 
 **For Windows (64-bit):**
 ```bash
+go mod tidy
 GOOS=windows GOARCH=amd64 go build -o secureshare-cli.exe main.go
 ```
 
