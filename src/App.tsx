@@ -88,7 +88,7 @@ const validateGenerateResponse = (res: Response) => {
   if (!res.ok) {
     if (res.status === 429) {
       const retryAfter = res.headers.get('Retry-After');
-      const waitMsg = retryAfter ? ` Please wait ${Math.ceil(parseInt(retryAfter) / 60)} minute(s).` : ' Please wait a while.';
+      const waitMsg = retryAfter ? ` Please wait ${Math.ceil(Number.parseInt(retryAfter, 10) / 60)} minute(s).` : ' Please wait a while.';
       throw new Error('Creation limit reached.' + waitMsg);
     }
     throw new Error('Failed to generate link');
@@ -144,7 +144,7 @@ export default function App() {
    * which is never sent to the server.
    */
   useEffect(() => {
-    const handleLocationChange = () => {
+    const processLocation = () => {
       try {
         const path = window.location.pathname;
         const hash = window.location.hash;
@@ -175,9 +175,9 @@ export default function App() {
       }
     };
 
-    handleLocationChange();
-    window.addEventListener('popstate', handleLocationChange);
-    return () => window.removeEventListener('popstate', handleLocationChange);
+    processLocation();
+    window.addEventListener('popstate', processLocation);
+    return () => window.removeEventListener('popstate', processLocation);
   }, []);
 
   const fetchSecret = async (id: string) => {
@@ -192,7 +192,7 @@ export default function App() {
       if (!res.ok) {
         if (res.status === 429) {
           const retryAfter = res.headers.get('Retry-After');
-          const waitMsg = retryAfter ? ` Please wait ${Math.ceil(parseInt(retryAfter) / 60)} minute(s).` : ' Please wait a moment.';
+          const waitMsg = retryAfter ? ` Please wait ${Math.ceil(Number.parseInt(retryAfter, 10) / 60)} minute(s).` : ' Please wait a moment.';
           throw new Error('Too many requests.' + waitMsg);
         }
         const data = await res.json();
@@ -215,6 +215,28 @@ export default function App() {
     }
   };
 
+  const performSecretGeneration = async () => {
+    const { encryptedData, key, salt } = await encryptSecret(secret, password);
+    const pHash = (password && salt) ? await hashPassword(password, salt) : null;
+    
+    const res = await fetch('/api/secrets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        encryptedData,
+        passwordHash: pHash,
+        salt: salt,
+        expirationHours: Number.parseInt(expiration, 10),
+        viewLimit: Number.parseInt(viewLimit, 10)
+      })
+    });
+    
+    validateGenerateResponse(res);
+    
+    const { id } = await res.json();
+    return `${getAppOrigin()}/s/${id}#${key}`;
+  };
+
   const handleGenerate = async () => {
     /**
      * SECRET CREATION FLOW
@@ -229,26 +251,7 @@ export default function App() {
     setError('');
     
     try {
-      const { encryptedData, key, salt } = await encryptSecret(secret, password);
-      const pHash = (password && salt) ? await hashPassword(password, salt) : null;
-      
-      const res = await fetch('/api/secrets', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          encryptedData,
-          passwordHash: pHash,
-          salt: salt,
-          expirationHours: Number.parseInt(expiration, 10),
-          viewLimit: Number.parseInt(viewLimit, 10)
-        })
-      });
-      
-      validateGenerateResponse(res);
-      
-      const { id } = await res.json();
-      const link = `${getAppOrigin()}/s/${id}#${key}`;
-      
+      const link = await performSecretGeneration();
       setGeneratedLink(link);
       setView('success');
     } catch (err: unknown) {
@@ -284,7 +287,7 @@ export default function App() {
       if (!res.ok) {
         if (res.status === 429) {
           const retryAfter = res.headers.get('Retry-After');
-          const waitMsg = retryAfter ? ` Please wait ${Math.ceil(parseInt(retryAfter) / 60)} minute(s).` : ' Please wait a moment.';
+          const waitMsg = retryAfter ? ` Please wait ${Math.ceil(Number.parseInt(retryAfter, 10) / 60)} minute(s).` : ' Please wait a moment.';
           throw new Error('Too many attempts.' + waitMsg);
         }
         const data = await res.json();
@@ -306,7 +309,7 @@ export default function App() {
 
   const copyToClipboard = async (text: string) => {
     try {
-      if (navigator.clipboard && navigator.clipboard.writeText) {
+      if (navigator.clipboard?.writeText) {
         await navigator.clipboard.writeText(text);
         setCopied(true);
         setTimeout(() => setCopied(false), 2000);
