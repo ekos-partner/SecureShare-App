@@ -170,7 +170,9 @@ export default function App() {
       const res = await fetch(`/api/secrets/${id}`);
       if (!res.ok) {
         if (res.status === 429) {
-          throw new Error('Too many requests. Please wait a moment before trying again.');
+          const retryAfter = res.headers.get('Retry-After');
+          const waitMsg = retryAfter ? ` Please wait ${Math.ceil(parseInt(retryAfter) / 60)} minute(s).` : ' Please wait a moment.';
+          throw new Error('Too many requests.' + waitMsg);
         }
         const data = await res.json();
         throw new Error(data.error || 'Failed to fetch secret');
@@ -223,7 +225,9 @@ export default function App() {
       
       if (!res.ok) {
         if (res.status === 429) {
-          throw new Error('Creation limit reached. Please wait a while before creating another secret.');
+          const retryAfter = res.headers.get('Retry-After');
+          const waitMsg = retryAfter ? ` Please wait ${Math.ceil(parseInt(retryAfter) / 60)} minute(s).` : ' Please wait a while.';
+          throw new Error('Creation limit reached.' + waitMsg);
         }
         throw new Error('Failed to generate link');
       }
@@ -275,7 +279,9 @@ export default function App() {
 
       if (!res.ok) {
         if (res.status === 429) {
-          throw new Error('Too many attempts. Please wait a moment before trying again.');
+          const retryAfter = res.headers.get('Retry-After');
+          const waitMsg = retryAfter ? ` Please wait ${Math.ceil(parseInt(retryAfter) / 60)} minute(s).` : ' Please wait a moment.';
+          throw new Error('Too many attempts.' + waitMsg);
         }
         const data = await res.json();
         throw new Error(data.error || 'Failed to verify');

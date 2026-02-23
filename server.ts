@@ -227,7 +227,7 @@ async function startServer() {
    */
   const globalLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: 5000, // Further increased to prevent 429 during heavy testing
+    max: 100, // Secure limit for general API usage
     standardHeaders: true,
     legacyHeaders: false,
     message: { error: "Too many requests from this IP, please try again later." }
@@ -236,13 +236,17 @@ async function startServer() {
 
   const createLimiter = rateLimit({
     windowMs: 60 * 60 * 1000,
-    max: 500, // Increased from 100 to prevent 429 during testing
+    max: 20, // Strict limit for secret creation
+    standardHeaders: true,
+    legacyHeaders: false,
     message: { error: "Creation limit reached. Please try again later." }
   });
 
   const authLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: 100, // Increased from 20 to prevent 429 during testing
+    max: 5, // Very strict limit for failed password attempts
+    standardHeaders: true,
+    legacyHeaders: false,
     skipSuccessfulRequests: true,
     message: { error: "Too many failed attempts. Please wait 15 minutes." }
   });
