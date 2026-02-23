@@ -200,7 +200,7 @@ async function startServer() {
     referrerPolicy: { policy: "no-referrer" },
     noSniff: true,
     crossOriginEmbedderPolicy: false,
-    frameguard: false, // Handled by CSP frame-ancestors
+    frameguard: { action: "sameorigin" },
   }));
 
   // Add the Permissions-Policy header manually
