@@ -74,6 +74,27 @@ const getPasswordStrengthLabel = (strength: number) => {
   return labels[strength] || "";
 };
 
+const getAppOrigin = () => {
+  try {
+    return (window.location.origin && window.location.origin !== 'null') 
+      ? window.location.origin 
+      : (window.location.protocol + '//' + window.location.host);
+  } catch {
+    return window.location.protocol + '//' + window.location.host;
+  }
+};
+
+const validateGenerateResponse = (res: Response) => {
+  if (!res.ok) {
+    if (res.status === 429) {
+      const retryAfter = res.headers.get('Retry-After');
+      const waitMsg = retryAfter ? ` Please wait ${Math.ceil(parseInt(retryAfter) / 60)} minute(s).` : ' Please wait a while.';
+      throw new Error('Creation limit reached.' + waitMsg);
+    }
+    throw new Error('Failed to generate link');
+  }
+};
+
 export default function App() {
   /**
    * APPLICATION STATE
@@ -223,28 +244,11 @@ export default function App() {
         })
       });
       
-      if (!res.ok) {
-        if (res.status === 429) {
-          const retryAfter = res.headers.get('Retry-After');
-          const waitMsg = retryAfter ? ` Please wait ${Math.ceil(parseInt(retryAfter) / 60)} minute(s).` : ' Please wait a while.';
-          throw new Error('Creation limit reached.' + waitMsg);
-        }
-        throw new Error('Failed to generate link');
-      }
+      validateGenerateResponse(res);
       
       const { id } = await res.json();
+      const link = `${getAppOrigin()}/s/${id}#${key}`;
       
-      // Robust origin detection for iframes
-      let origin = '';
-      try {
-        origin = (window.location.origin && window.location.origin !== 'null') 
-          ? window.location.origin 
-          : (window.location.protocol + '//' + window.location.host);
-      } catch {
-        origin = window.location.protocol + '//' + window.location.host;
-      }
-      
-      const link = `${origin}/s/${id}#${key}`;
       setGeneratedLink(link);
       setView('success');
     } catch (err: unknown) {
