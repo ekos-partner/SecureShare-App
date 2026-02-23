@@ -156,7 +156,7 @@ function handleViewLimit(db: Database.Database, secret: any) {
 }
 
 const app = express();
-const PORT = 3000;
+const PORT = Number.parseInt(process.env.PORT || "3000", 10);
 
 // Disable X-Powered-By to prevent technology fingerprinting (Proxy Disclosure)
 app.disable('x-powered-by');
@@ -186,15 +186,15 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", (req, res) => `'nonce-${(res as express.Response).locals.nonce}'`],
+      scriptSrc: ["'self'", (req, res) => `'nonce-${res.locals.nonce}'`],
       // Restored 'unsafe-inline' for styles as many React/Motion components require it
-      styleSrc: ["'self'", "'unsafe-inline'", (req, res) => `'nonce-${(res as express.Response).locals.nonce}'`, "https://fonts.googleapis.com"],
+      styleSrc: ["'self'", "'unsafe-inline'", (req, res) => `'nonce-${res.locals.nonce}'`, "https://fonts.googleapis.com"],
       fontSrc: ["'self'", "https://fonts.gstatic.com"],
       imgSrc: ["'self'", "data:", "https://picsum.photos", "blob:"],
       // Tightened connectSrc to address "CSP: Wildcard Directive"
       connectSrc: ["'self'"],
       // frameAncestors must allow Google domains for the AI Studio preview to function
-      frameAncestors: ["'self'", "https://*.google.com", "https://*.run.app", "https://*.aistudio.google.com"],
+      frameAncestors: ["'self'", "https://*.google.com", "https://*.run.app"],
     },
   },
   hsts: {
@@ -396,59 +396,60 @@ setInterval(() => {
 /**
  * STATIC FILE SERVING & VITE INTEGRATION
  */
-if (process.env.NODE_ENV === "production") {
-  // Production mode: Serve pre-built static files from /dist
-  const distPath = path.resolve(process.cwd(), "dist");
-  if (fs.existsSync(distPath)) {
-    app.engine('html', ejs.renderFile);
-    app.set('view engine', 'html');
-    app.set('views', distPath);
+const startServer = async () => {
+  if (process.env.NODE_ENV === "production") {
+    // Production mode: Serve pre-built static files from /dist
+    const distPath = path.resolve(process.cwd(), "dist");
+    if (fs.existsSync(distPath)) {
+      app.engine('html', ejs.renderFile);
+      app.set('view engine', 'html');
+      app.set('views', distPath);
 
-    app.use(express.static(distPath));
-    app.get("*", (req, res) => {
-      res.render(path.resolve(distPath, "index.html"), { nonce: res.locals.nonce });
-    });
-  } else {
-    console.warn("Production build 'dist' folder not found. Static files will not be served.");
-  }
-} else {
-  // Development mode: Use Vite middleware and EJS for nonce injection
-  const { createServer: createViteServer } = await import("vite");
-  const vite = await createViteServer({
-    server: { middlewareMode: true },
-    appType: "spa",
-  });
-  app.use(vite.middlewares);
-  app.get('*', async (req, res, next) => {
-    try {
-      // Sanitize URL to prevent XSS warnings from Snyk (CWE-79)
-      // We only need the path for Vite's transformIndexHtml
-      const url = req.path; 
-      const template = await vite.transformIndexHtml(url, fs.readFileSync(path.resolve(process.cwd(), 'index.html'), 'utf-8'));
-      // Use simple string replacement instead of ejs.render to avoid "dynamically formatted template" security warnings
-      const renderedHtml = template.replaceAll('<%= nonce %>', res.locals.nonce);
-      res.status(200).set({ 'Content-Type': 'text/html' }).end(renderedHtml);
-    } catch (e) {
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      vite.ssrFixStacktrace(e as any);
-      next(e);
+      app.use(express.static(distPath));
+      app.get("*", (req, res) => {
+        res.render(path.resolve(distPath, "index.html"), { nonce: res.locals.nonce });
+      });
+    } else {
+      console.warn("Production build 'dist' folder not found. Static files will not be served.");
     }
-  });
-}
+  } else {
+    // Development mode: Use Vite middleware and EJS for nonce injection
+    const { createServer: createViteServer } = await import("vite");
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: "spa",
+    });
+    app.use(vite.middlewares);
+    app.get('*', async (req, res, next) => {
+      try {
+        // Sanitize URL to prevent XSS warnings from Snyk (CWE-79)
+        // We only need the path for Vite's transformIndexHtml
+        const url = req.path; 
+        const template = await vite.transformIndexHtml(url, fs.readFileSync(path.resolve(process.cwd(), 'index.html'), 'utf-8'));
+        // Use simple string replacement instead of ejs.render to avoid "dynamically formatted template" security warnings
+        const renderedHtml = template.replaceAll('<%= nonce %>', res.locals.nonce);
+        res.status(200).set({ 'Content-Type': 'text/html' }).end(renderedHtml);
+      } catch (e) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        vite.ssrFixStacktrace(e as any);
+        next(e);
+      }
+    });
+  }
 
-// Security.txt implementation (RFC 9116)
-app.get(["/.well-known/security.txt", "/security.txt"], (req, res) => {
-  const securityTxt = `Contact: mailto:security@${req.hostname}
+  // Security.txt implementation (RFC 9116)
+  app.get(["/.well-known/security.txt", "/security.txt"], (req, res) => {
+    const securityTxt = `Contact: mailto:security@${req.hostname}
 Expires: ${new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString()}
 Preferred-Languages: en, pl
 Canonical: https://${req.hostname}/.well-known/security.txt
 Policy: https://${req.hostname}/security-policy
 `;
-  res.type('text/plain').send(securityTxt);
-});
+    res.type('text/plain').send(securityTxt);
+  });
 
-app.get("/security-policy", (req, res) => {
-  res.type('text/plain').send(`# Security Policy
+  app.get("/security-policy", (req, res) => {
+    res.type('text/plain').send(`# Security Policy
 
 1. Reporting
    Please report vulnerabilities via GitHub's "Report a vulnerability" feature in the Security tab.
@@ -460,15 +461,18 @@ app.get("/security-policy", (req, res) => {
 3. Response
    We aim to respond within 48 hours.
 `);
-});
+  });
 
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`Server running on http://localhost:${PORT}`);
-});
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+  });
 
-// Global error handler
-// eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars
-app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
-  console.error(err);
-  res.status(500).send('Internal Server Error');
-});
+  // Global error handler
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars
+  app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    console.error(err);
+    res.status(500).send('Internal Server Error');
+  });
+};
+
+startServer().catch(console.error);

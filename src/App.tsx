@@ -76,11 +76,11 @@ const getPasswordStrengthLabel = (strength: number) => {
 
 const getAppOrigin = () => {
   try {
-    return (window.location.origin && window.location.origin !== 'null') 
-      ? window.location.origin 
-      : (window.location.protocol + '//' + window.location.host);
+    return (globalThis.location.origin && globalThis.location.origin !== 'null') 
+      ? globalThis.location.origin 
+      : (globalThis.location.protocol + '//' + globalThis.location.host);
   } catch {
-    return window.location.protocol + '//' + window.location.host;
+    return globalThis.location.protocol + '//' + globalThis.location.host;
   }
 };
 
@@ -122,8 +122,10 @@ export default function App() {
   const [showViewPassword, setShowViewPassword] = useState(false);
   const [decryptedSecret, setDecryptedSecret] = useState('');
   const [isBurned, setIsBurned] = useState(false);
+  const [isDestroyed, setIsDestroyed] = useState(false);
   const [remainingViews, setRemainingViews] = useState<number | null>(null);
   const [showInfo, setShowInfo] = useState(false);
+  const [isDownloadingQR, setIsDownloadingQR] = useState(false);
   const qrCodeRef = React.useRef<HTMLDivElement>(null);
 
   /**
@@ -146,8 +148,8 @@ export default function App() {
   useEffect(() => {
     const processLocation = () => {
       try {
-        const path = window.location.pathname;
-        const hash = window.location.hash;
+        const path = globalThis.location.pathname;
+        const hash = globalThis.location.hash;
         
         if (path.includes('/s/')) {
           // More robust ID extraction: handle trailing slashes and potential sub-paths
@@ -176,8 +178,8 @@ export default function App() {
     };
 
     processLocation();
-    window.addEventListener('popstate', processLocation);
-    return () => window.removeEventListener('popstate', processLocation);
+    globalThis.addEventListener('popstate', processLocation);
+    return () => globalThis.removeEventListener('popstate', processLocation);
   }, []);
 
   const fetchSecret = async (id: string) => {
@@ -351,9 +353,16 @@ export default function App() {
     setShowPassword(false);
     setShowViewPassword(false);
     setShowQR(false);
+    setIsDestroyed(false);
   };
 
-  const handleDownloadQR = () => {
+  const handleDownloadQR = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    if (isDownloadingQR) return;
+    setIsDownloadingQR(true);
+
     try {
       if (qrCodeRef.current) {
         const svgElement = qrCodeRef.current.querySelector('svg');
@@ -372,6 +381,9 @@ export default function App() {
       }
     } catch {
       setError("Could not download QR code due to browser security restrictions.");
+    } finally {
+      // Prevent rapid-fire downloads
+      setTimeout(() => setIsDownloadingQR(false), 1000);
     }
   };
 
@@ -595,9 +607,10 @@ export default function App() {
                   <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 0.2 }}>
                     <button 
                       onClick={handleDownloadQR}
-                      className="mt-4 text-xs font-bold text-indigo-400 hover:text-indigo-300 transition-colors"
+                      disabled={isDownloadingQR}
+                      className="mt-4 text-xs font-bold text-indigo-400 hover:text-indigo-300 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      Download QR (SVG)
+                      {isDownloadingQR ? 'Downloading...' : 'Download QR (SVG)'}
                     </button>
                   </motion.div>
                 )}
@@ -693,15 +706,41 @@ export default function App() {
                   <div className="flex items-center justify-between mb-6">
                     <h2 className="text-2xl font-bold text-slate-900 dark:text-white">Secret Content</h2>
                     <button
-                      onClick={() => copyToClipboard(decryptedSecret)}
-                      className="flex items-center gap-2 px-4 py-2 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-xl hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-all font-bold"
+                      onClick={async () => {
+                        await copyToClipboard(decryptedSecret);
+                        if (isBurned) {
+                          setTimeout(() => setIsDestroyed(true), 1500);
+                        }
+                      }}
+                      disabled={isDestroyed}
+                      className="flex items-center gap-2 px-4 py-2 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-xl hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-all font-bold disabled:opacity-50 disabled:cursor-not-allowed"
                     >
                       {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
                       {copied ? 'Copied' : 'Copy'}
                     </button>
                   </div>
-                  <div className="bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-slate-100 p-6 rounded-2xl font-mono text-sm break-all whitespace-pre-wrap mb-8 max-h-96 overflow-y-auto border border-slate-200 dark:border-slate-800 shadow-inner">
-                    {decryptedSecret}
+                  <div className="relative overflow-hidden rounded-2xl mb-8 border border-slate-200 dark:border-slate-800 shadow-inner bg-slate-50 dark:bg-slate-900 min-h-[160px]">
+                    <motion.div 
+                      animate={isDestroyed ? { filter: "blur(20px)", opacity: 0, scale: 0.95 } : {}}
+                      transition={{ duration: 1.5, ease: "easeInOut" }}
+                      className="p-6 font-mono text-sm break-all whitespace-pre-wrap max-h-96 overflow-y-auto text-slate-900 dark:text-slate-100"
+                    >
+                      {decryptedSecret}
+                    </motion.div>
+                    
+                    {isDestroyed && (
+                      <motion.div 
+                        initial={{ opacity: 0, scale: 0.8 }} 
+                        animate={{ opacity: 1, scale: 1 }} 
+                        transition={{ delay: 0.5, duration: 0.5 }}
+                        className="absolute inset-0 flex flex-col items-center justify-center bg-slate-100/50 dark:bg-slate-900/50 backdrop-blur-sm z-10"
+                      >
+                        <div className="p-4 bg-slate-900 dark:bg-slate-800 rounded-full mb-3 shadow-xl">
+                          <Trash2 className="w-8 h-8 text-red-500" />
+                        </div>
+                        <p className="text-lg font-bold text-slate-700 dark:text-slate-300">Secret Destroyed</p>
+                      </motion.div>
+                    )}
                   </div>
                   
                   {isBurned ? (

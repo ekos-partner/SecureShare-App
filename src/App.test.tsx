@@ -5,7 +5,7 @@ import App from './App';
 import { webcrypto } from 'node:crypto';
 
 // Mock crypto API for testing
-Object.defineProperty(global, 'crypto', {
+Object.defineProperty(globalThis, 'crypto', {
   value: {
     getRandomValues: (arr: Uint8Array) => webcrypto.getRandomValues(arr),
     subtle: {
