@@ -8,12 +8,12 @@ tidy:
 	go mod tidy
 
 build:
-	go build -o $(BINARY_NAME) main.go
+	go build -o $(BINARY_NAME) .
 
 build-all: tidy
-	GOOS=windows GOARCH=amd64 go build -o $(BINARY_NAME).exe main.go
-	GOOS=linux GOARCH=amd64 go build -o $(BINARY_NAME)-linux main.go
-	GOOS=darwin GOARCH=arm64 go build -o $(BINARY_NAME)-mac main.go
+	GOOS=windows GOARCH=amd64 go build -o $(BINARY_NAME).exe .
+	GOOS=linux GOARCH=amd64 go build -o $(BINARY_NAME)-linux .
+	GOOS=darwin GOARCH=arm64 go build -o $(BINARY_NAME)-mac .
 
 clean:
 	rm -f $(BINARY_NAME)
