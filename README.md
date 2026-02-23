@@ -83,6 +83,11 @@ npm run lint
 -   **Zero-Knowledge**: Server never sees the decryption key.
 -   **Rate Limiting**: Protects against brute-force and DoS.
 
+## 💻 CLI Tool
+A command-line interface (CLI) is available for encrypting and sharing secrets directly from your terminal. It supports cross-compilation for Windows, macOS, and Linux.
+
+See [cli/README.md](./cli/README.md) for installation and usage instructions.
+
 ## 🛠️ Technology Stack
 - **Frontend**: React 19, Tailwind CSS 4, Motion.
 - **Backend**: Node.js (Express) with `helmet` and `express-rate-limit`.
