@@ -92,3 +92,8 @@ npm run lint
 ## 📋 Compliance & Standards
 - **RFC 9116**: `security.txt` is implemented at `/.well-known/security.txt`.
 - **Opaque Errors**: Prevents enumeration attacks.
+
+## ⚙️ Technical Limits
+- **Secret Size**: Maximum 1MB of encrypted data per secret.
+- **View Limit**: Maximum 10 views per secret.
+- **Expiration**: Maximum 7 days (168 hours).

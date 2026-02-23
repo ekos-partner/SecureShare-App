@@ -169,6 +169,9 @@ export default function App() {
     try {
       const res = await fetch(`/api/secrets/${id}`);
       if (!res.ok) {
+        if (res.status === 429) {
+          throw new Error('Too many requests. Please wait a moment before trying again.');
+        }
         const data = await res.json();
         throw new Error(data.error || 'Failed to fetch secret');
       }
@@ -218,7 +221,12 @@ export default function App() {
         })
       });
       
-      if (!res.ok) throw new Error('Failed to generate link');
+      if (!res.ok) {
+        if (res.status === 429) {
+          throw new Error('Creation limit reached. Please wait a while before creating another secret.');
+        }
+        throw new Error('Failed to generate link');
+      }
       
       const { id } = await res.json();
       
@@ -266,6 +274,9 @@ export default function App() {
       });
 
       if (!res.ok) {
+        if (res.status === 429) {
+          throw new Error('Too many attempts. Please wait a moment before trying again.');
+        }
         const data = await res.json();
         throw new Error(data.error || 'Failed to verify');
       }
@@ -396,8 +407,17 @@ export default function App() {
                     placeholder="Paste your password, API token, or message here..."
                     className="w-full h-40 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 transition-all resize-none bg-white/50 dark:bg-slate-800/50 dark:text-white placeholder:text-slate-400 text-lg"
                   />
-                  <div className="flex justify-end mt-2 px-1">
-                    <span className="text-xs font-medium text-slate-400 dark:text-slate-500">
+                  <div className="flex justify-between mt-2 px-1 items-center">
+                    <p className={cn(
+                      "text-[10px] font-bold uppercase tracking-wider transition-colors",
+                      secret.length > 750000 ? "text-amber-500" : "text-slate-400 dark:text-slate-500"
+                    )}>
+                      {secret.length > 750000 ? "Approaching size limit (Max ~750KB plaintext)" : "Encrypted size limit: 1MB"}
+                    </p>
+                    <span className={cn(
+                      "text-xs font-medium transition-colors",
+                      secret.length > 750000 ? "text-amber-500 font-bold" : "text-slate-400 dark:text-slate-500"
+                    )}>
                       {secret.length.toLocaleString()} characters
                     </span>
                   </div>
