@@ -17,6 +17,7 @@ import Database from "better-sqlite3";
 import { v4 as uuidv4 } from "uuid";
 import path from "node:path";
 import fs from "node:fs";
+import os from "node:os";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import cors from "cors";
@@ -36,10 +37,17 @@ const getDatabase = () => {
   const dbPath = process.env.DB_PATH || path.join(process.cwd(), "secrets.db");
   try {
     return new Database(dbPath);
-  } catch {
-    // Fallback to /tmp for environments with read-only filesystems (like some Cloud Run setups)
-    console.error(`Failed to open database at ${dbPath}, trying /tmp/secrets.db`);
-    return new Database("/tmp/secrets.db");
+  } catch (err) {
+    // Fallback to a secure temporary directory for environments with read-only filesystems
+    try {
+      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'secureshare-'));
+      const tmpDbPath = path.join(tmpDir, 'secrets.db');
+      console.warn(`Failed to open database at ${dbPath}, using secure temporary database at ${tmpDbPath}`);
+      return new Database(tmpDbPath);
+    } catch (tmpErr) {
+      console.error('Failed to create temporary database:', tmpErr);
+      throw err;
+    }
   }
 };
 
