@@ -1,4 +1,4 @@
-# 🛡️ SecureShare
+# 🛡️ SecureShare - Security Architecture
 
 ![SecureShare Screenshot](screenshot.png)
 
@@ -29,6 +29,22 @@ To prevent automated guessing of access passwords:
 - **Permissions Policy**: Disables all unnecessary browser features (camera, microphone, geolocation) to reduce the attack surface.
 - **Opaque Errors**: The API returns identical 404 errors for non-existent, expired, or already burned secrets to prevent ID enumeration.
 
+## 🔄 How it Works
+
+The security of SecureShare relies on the fact that the server is never aware of the decryption key.
+
+```mermaid
+sequenceDiagram
+    participant U as User (Browser)
+    participant S as Server (Node.js)
+    participant D as Database (SQLite)
+    U->>U: Encrypt data (AES-GCM)
+    U->>S: Send Ciphertext
+    S->>D: Store Ciphertext & ID
+    S->>U: Return Secret ID
+    Note over U: Key is kept in URL hash (#)
+```
+
 ## 🛡️ Threat Model
 For a detailed analysis of security assumptions and mitigations, see [THREAT_MODEL.md](./THREAT_MODEL.md).
 
@@ -46,16 +62,22 @@ docker build -t secureshare .
 docker run -d -p 3000:3000 -v $(pwd)/data:/app/data secureshare
 ```
 
-## 🛠️ Development
+## 🧪 Development & Testing
 ```bash
 # Install dependencies
 npm install
 
 # Start development server (Express + Vite)
 npm run dev
+
+# Run unit and integration tests
+npm test
+
+# Lint the codebase
+npm run lint
 ```
 
-## 🧪 Security Features
+## 🛡️ Security Features
 -   **AES-256-GCM Encryption**: Authenticated encryption using Web Crypto API.
 -   **Atomic Transactions**: Prevents race conditions during secret destruction.
 -   **Zero-Knowledge**: Server never sees the decryption key.
