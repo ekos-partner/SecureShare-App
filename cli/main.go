@@ -13,7 +13,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"runtime"
 	"strings"
 	"time"
 
@@ -59,60 +58,47 @@ func failOnError(err error, msg string) {
 }
 
 func main() {
-	// Detect if we have piped input
-	stat, _ := os.Stdin.Stat()
-	isPiped := (stat.Mode() & os.ModeCharDevice) == 0
-
+	// Simple subcommand detection
 	if len(os.Args) > 1 {
-		switch os.Args[1] {
-		case "get":
+		if os.Args[1] == "get" {
 			handleGet()
 			return
-		case "create":
-			handleCreate(os.Args[2:])
-			return
-		case "help", "-h", "--help":
+		}
+		if os.Args[1] == "help" || os.Args[1] == "-h" || os.Args[1] == "--help" {
 			printGeneralUsage()
 			return
 		}
-		
-		// If the first argument looks like a flag (starts with -), 
-		// we treat it as the default 'create' command for backward compatibility.
-		if strings.HasPrefix(os.Args[1], "-") {
-			handleCreate(os.Args[1:])
+		// If it's 'create', skip the word and pass the rest
+		if os.Args[1] == "create" {
+			handleCreate(os.Args[2:])
 			return
 		}
-	} else if !isPiped {
-		// No arguments and no piped input: show general help
+	}
+
+	// Check for piped input or arguments
+	stat, err := os.Stdin.Stat()
+	isPiped := err == nil && (stat.Mode()&os.ModeCharDevice) == 0
+
+	if len(os.Args) < 2 && !isPiped {
 		printGeneralUsage()
 		return
 	}
 
-	// If we have arguments (that aren't subcommands) or piped input, default to create
+	// Default: handle as create with all original arguments
 	handleCreate(os.Args[1:])
 }
 
 func printGeneralUsage() {
-	binaryName := "secureshare-cli"
-	pathSep := "/"
-	if runtime.GOOS == "windows" {
-		binaryName = "secureshare-cli.exe"
-		pathSep = "\\"
-	}
-
-	fmt.Printf("SecureShare CLI - End-to-End Encrypted Secret Sharing (%s)\n", runtime.GOOS)
+	// Use a simpler approach without 'runtime' package for help
+	fmt.Println("SecureShare CLI - End-to-End Encrypted Secret Sharing")
 	fmt.Println("\nUsage:")
-	fmt.Printf("  .%s%s create [options] [secret]  - Create a new secret\n", pathSep, binaryName)
-	fmt.Printf("  .%s%s get <url> [options]        - Retrieve and decrypt a secret\n", pathSep, binaryName)
+	fmt.Println("  secureshare-cli create [options] [secret]  - Create a new secret")
+	fmt.Println("  secureshare-cli get <url> [options]        - Retrieve and decrypt a secret")
 	fmt.Println("\nExamples:")
-	fmt.Printf("  .%s%s \"Hello World\"\n", pathSep, binaryName)
-	if runtime.GOOS == "windows" {
-		fmt.Printf("  echo \"Secret\" | .\\%s -expire 1\n", binaryName)
-	} else {
-		fmt.Printf("  echo \"Secret\" | ./%s -expire 1\n", binaryName)
-	}
-	fmt.Printf("  .%s%s get https://...#key\n", pathSep, binaryName)
-	fmt.Printf("\nRun '.%s%s create --help' or '.%s%s get --help' for more details.\n", pathSep, binaryName, pathSep, binaryName)
+	fmt.Println("  secureshare-cli \"Hello World\"")
+	fmt.Println("  echo \"Secret\" | secureshare-cli")
+	fmt.Println("  secureshare-cli get https://...#key")
+	fmt.Println("\nRun 'secureshare-cli create --help' for more options.")
 }
 
 func handleGet() {
