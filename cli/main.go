@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"time" // [FIX] Dodano do obsługi timeoutu
 
 	"golang.org/x/crypto/pbkdf2"
 )
@@ -38,12 +39,23 @@ type CreateSecretResponse struct {
 	ID string `json:"id"`
 }
 
+// [FIX] Funkcja pomocnicza do ładnego wyświetlania błędów
+func failOnError(err error, msg string) {
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %s: %v\n", msg, err)
+		os.Exit(1)
+	}
+}
+
 func main() {
 	apiURL := flag.String("url", defaultAPIURL, "API URL of the SecureShare instance")
 	expiration := flag.Int("expire", 24, "Expiration time in hours (1-168)")
 	views := flag.Int("views", 1, "View limit (1-10)")
 	password := flag.String("password", "", "Optional password for extra protection")
 	flag.Parse()
+
+	// [FIX] Normalizacja URL (usuwanie końcowego slasha, jeśli użytkownik go podał)
+	cleanAPIURL := strings.TrimSuffix(*apiURL, "/")
 
 	// Read secret from stdin or arguments
 	var secretContent []byte
@@ -54,11 +66,10 @@ func main() {
 		stat, _ := os.Stdin.Stat()
 		if (stat.Mode() & os.ModeCharDevice) == 0 {
 			var err error
-			secretContent, err = io.ReadAll(os.Stdin)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Error reading from stdin: %v\n", err)
-				os.Exit(1)
-			}
+			rawContent, err := io.ReadAll(os.Stdin)
+			failOnError(err, "reading from stdin")
+			// [FIX] Usuwamy białe znaki (np. newline z echo)
+			secretContent = bytes.TrimSpace(rawContent)
 		} else {
 			fmt.Println("Usage: echo 'secret' | secureshare-cli [options]")
 			flag.PrintDefaults()
@@ -73,9 +84,8 @@ func main() {
 
 	// 1. Generate Key
 	key := make([]byte, keySize)
-	if _, err := rand.Read(key); err != nil {
-		panic(err)
-	}
+	_, err := rand.Read(key)
+	failOnError(err, "generating random key")
 	keyBase64 := base64.StdEncoding.EncodeToString(key)
 
 	// 2. Encrypt Content
@@ -84,20 +94,16 @@ func main() {
 	var passwordHashBase64 *string
 
 	if *password != "" {
-		// Password-based encryption logic matching the frontend
 		salt := make([]byte, saltSize)
-		if _, err := rand.Read(salt); err != nil {
-			panic(err)
-		}
+		_, err := rand.Read(salt)
+		failOnError(err, "generating salt")
+		
 		s := base64.StdEncoding.EncodeToString(salt)
 		saltBase64 = &s
 
-		// Derive key: PBKDF2(key + password, salt)
 		combinedSecret := keyBase64 + *password
 		encryptionKey = pbkdf2.Key([]byte(combinedSecret), salt, iterations, keySize, sha256.New)
 
-		// Generate password hash for server verification
-		// Use PBKDF2 instead of SHA-256 to satisfy CodeQL and improve security
 		pwHash := pbkdf2.Key([]byte(*password), salt, iterations, 32, sha256.New)
 		ph := base64.StdEncoding.EncodeToString(pwHash)
 		passwordHashBase64 = &ph
@@ -106,23 +112,17 @@ func main() {
 	}
 
 	block, err := aes.NewCipher(encryptionKey)
-	if err != nil {
-		panic(err)
-	}
+	failOnError(err, "creating cipher block")
 
 	aesgcm, err := cipher.NewGCM(block)
-	if err != nil {
-		panic(err)
-	}
+	failOnError(err, "creating GCM")
 
 	iv := make([]byte, ivSize)
-	if _, err := rand.Read(iv); err != nil {
-		panic(err)
-	}
+	_, err = rand.Read(iv)
+	failOnError(err, "generating IV")
 
 	ciphertext := aesgcm.Seal(nil, iv, secretContent, nil)
 
-	// Format: IV:Ciphertext
 	ivBase64 := base64.StdEncoding.EncodeToString(iv)
 	ciphertextBase64 := base64.StdEncoding.EncodeToString(ciphertext)
 	encryptedData := ivBase64 + ":" + ciphertextBase64
@@ -137,18 +137,21 @@ func main() {
 	}
 
 	jsonData, err := json.Marshal(reqBody)
-	if err != nil {
-		panic(err)
+	failOnError(err, "marshaling JSON")
+
+	// [FIX] Użycie własnego klienta HTTP z timeoutem (zamiast http.Post)
+	client := &http.Client{
+		Timeout: 15 * time.Second,
 	}
 
-	resp, err := http.Post(*apiURL+"/api/secrets", "application/json", bytes.NewBuffer(jsonData))
+	resp, err := client.Post(cleanAPIURL+"/api/secrets", "application/json", bytes.NewBuffer(jsonData))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error sending request: %v\n", err)
 		os.Exit(1)
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		body, _ := io.ReadAll(resp.Body)
 		fmt.Fprintf(os.Stderr, "Server error (%d): %s\n", resp.StatusCode, string(body))
 		os.Exit(1)
@@ -161,8 +164,7 @@ func main() {
 	}
 
 	// 4. Output Link
-	// The link format is: <URL>/secret/<ID>#<KEY>
-	// Note: The key is in the URL fragment, so it's never sent to the server.
-	shareLink := fmt.Sprintf("%s/secret/%s#%s", *apiURL, result.ID, keyBase64)
+	// [FIX] Użycie cleanAPIURL
+	shareLink := fmt.Sprintf("%s/secret/%s#%s", cleanAPIURL, result.ID, keyBase64)
 	fmt.Println(shareLink)
 }

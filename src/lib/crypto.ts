@@ -205,11 +205,32 @@ export async function decryptSecret(encryptedDataPacked: string, keyStr: string,
 }
 
 /**
- * Hashes a password for server-side verification (SHA-256).
+ * Hashes a password for server-side verification using PBKDF2.
+ * This is stronger than simple SHA-256 and satisfies security scanners.
  */
 export async function hashPassword(password: string, saltStr: string): Promise<string> {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(password + saltStr);
-  const hashBuffer = await window.crypto.subtle.digest('SHA-256', data);
-  return arrayBufferToBase64(hashBuffer);
+  const salt = base64ToArrayBuffer(saltStr);
+  const enc = new TextEncoder();
+  const keyMaterial = enc.encode(password);
+
+  const importedKey = await window.crypto.subtle.importKey(
+    "raw",
+    keyMaterial,
+    { name: "PBKDF2" },
+    false,
+    ["deriveBits"]
+  );
+
+  const derivedBits = await window.crypto.subtle.deriveBits(
+    {
+      name: "PBKDF2",
+      salt: new Uint8Array(salt),
+      iterations: PBKDF2_ITERATIONS,
+      hash: "SHA-256"
+    },
+    importedKey,
+    256
+  );
+
+  return arrayBufferToBase64(derivedBits);
 }

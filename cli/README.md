@@ -38,9 +38,18 @@ You can build binaries for other platforms from your current machine.
 GOOS=windows GOARCH=amd64 go build -o secureshare-cli.exe .
 ```
 
-**For Linux (64-bit):**
+### Troubleshooting Build Errors
+
+If you encounter an error like `open secureshare-cli: no such file or directory`, try cleaning the directory first:
+
 ```bash
-GOOS=linux GOARCH=amd64 go build -o secureshare-cli-linux .
+rm -f secureshare-cli secureshare-cli.exe
+go build .
+```
+
+If that fails, try specifying a different output name:
+```bash
+go build -o app .
 ```
 
 **For macOS (Apple Silicon):**

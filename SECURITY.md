@@ -11,11 +11,12 @@ Only the latest version of this project is currently supported.
 
 ## Reporting a Vulnerability
 
-We strongly encourage you to report security vulnerabilities through **GitHub's Private Vulnerability Reporting** feature.
+We strongly encourage you to report security vulnerabilities through **GitHub's Private Vulnerability Reporting** feature or by sending a **Private Message** to the repository maintainers.
 
 1. Go to the **Security** tab of this repository.
 2. Click on **"Report a vulnerability"**.
-3. Fill in the details of the exploit or vulnerability.
+3. Alternatively, use GitHub's messaging system to contact us privately.
+4. Fill in the details of the exploit or vulnerability.
 
 This ensures that the vulnerability is discussed privately and allows us to release a fix before the issue becomes public knowledge.
 
