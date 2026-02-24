@@ -39,6 +39,16 @@ type CreateSecretResponse struct {
 	ID string `json:"id"`
 }
 
+type GetSecretResponse struct {
+	EncryptedData string  `json:"encryptedData"`
+	HasPassword   bool    `json:"hasPassword"`
+	Salt          *string `json:"salt,omitempty"`
+}
+
+type BurnSecretRequest struct {
+	PasswordHash *string `json:"passwordHash,omitempty"`
+}
+
 // Helper function to display errors and exit
 func failOnError(err error, msg string) {
 	if err != nil {
@@ -48,6 +58,127 @@ func failOnError(err error, msg string) {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "get" {
+		handleGet()
+		return
+	}
+	handleCreate()
+}
+
+func handleGet() {
+	getFlags := flag.NewFlagSet("get", flag.ExitOnError)
+	password := getFlags.String("password", "", "Password for the secret (if protected)")
+	getFlags.Parse(os.Args[2:])
+
+	if getFlags.NArg() < 1 {
+		fmt.Println("Usage: secureshare-cli get <url> [-password <pw>]")
+		os.Exit(1)
+	}
+
+	rawURL := getFlags.Arg(0)
+	// Parse URL: https://domain.com/s/uuid#key
+	parts := strings.Split(rawURL, "#")
+	if len(parts) < 2 {
+		fmt.Println("Error: Invalid URL format. Missing decryption key (fragment after #)")
+		os.Exit(1)
+	}
+	keyBase64 := parts[1]
+	
+	// Extract ID from path
+	urlParts := strings.Split(parts[0], "/")
+	id := urlParts[len(urlParts)-1]
+	if id == "" && len(urlParts) > 1 {
+		id = urlParts[len(urlParts)-2]
+	}
+
+	// Determine API URL from the provided link
+	apiURL := strings.Join(urlParts[:3], "/") // http(s)://domain.com
+
+	client := &http.Client{Timeout: 15 * time.Second}
+
+	// 1. Fetch Metadata
+	resp, err := client.Get(apiURL + "/api/secrets/" + id)
+	failOnError(err, "fetching secret metadata")
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		fmt.Fprintf(os.Stderr, "Error: Secret not found or expired (%d): %s\n", resp.StatusCode, string(body))
+		os.Exit(1)
+	}
+
+	var meta GetSecretResponse
+	err = json.NewDecoder(resp.Body).Decode(&meta)
+	failOnError(err, "decoding metadata")
+
+	// 2. Handle Password and Burn
+	var encryptionKey []byte
+	var passwordHashBase64 *string
+
+	if meta.HasPassword {
+		pw := *password
+		if pw == "" {
+			fmt.Print("Secret is password protected. Enter password: ")
+			fmt.Scanln(&pw)
+		}
+
+		if meta.Salt == nil {
+			fmt.Println("Error: Missing salt for password-protected secret")
+			os.Exit(1)
+		}
+		salt, err := base64.StdEncoding.DecodeString(*meta.Salt)
+		failOnError(err, "decoding salt")
+
+		combinedSecret := keyBase64 + pw
+		encryptionKey = pbkdf2.Key([]byte(combinedSecret), salt, iterations, keySize, sha256.New)
+
+		pwHash := pbkdf2.Key([]byte(pw), salt, iterations, 32, sha256.New)
+		ph := base64.StdEncoding.EncodeToString(pwHash)
+		passwordHashBase64 = &ph
+	} else {
+		key, err := base64.StdEncoding.DecodeString(keyBase64)
+		failOnError(err, "decoding key from URL")
+		encryptionKey = key
+	}
+
+	// Burn the secret
+	burnReq := BurnSecretRequest{PasswordHash: passwordHashBase64}
+	burnData, _ := json.Marshal(burnReq)
+	burnResp, err := client.Post(apiURL+"/api/secrets/"+id+"/burn", "application/json", bytes.NewBuffer(burnData))
+	failOnError(err, "burning secret")
+	defer burnResp.Body.Close()
+
+	if burnResp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(burnResp.Body)
+		fmt.Fprintf(os.Stderr, "Error: Failed to access secret (%d): %s\n", burnResp.StatusCode, string(body))
+		os.Exit(1)
+	}
+
+	// 3. Decrypt
+	dataParts := strings.Split(meta.EncryptedData, ":")
+	if len(dataParts) != 2 {
+		fmt.Println("Error: Invalid encrypted data format from server")
+		os.Exit(1)
+	}
+
+	iv, err := base64.StdEncoding.DecodeString(dataParts[0])
+	failOnError(err, "decoding IV")
+	ciphertext, err := base64.StdEncoding.DecodeString(dataParts[1])
+	failOnError(err, "decoding ciphertext")
+
+	block, err := aes.NewCipher(encryptionKey)
+	failOnError(err, "creating cipher block")
+
+	aesgcm, err := cipher.NewGCM(block)
+	failOnError(err, "creating GCM")
+
+	plaintext, err := aesgcm.Open(nil, iv, ciphertext, nil)
+	failOnError(err, "decrypting data")
+
+	fmt.Println(string(plaintext))
+}
+
+func handleCreate() {
 	apiURL := flag.String("url", defaultAPIURL, "API URL of the SecureShare instance")
 	expiration := flag.Int("expire", 24, "Expiration time in hours (1-168)")
 	views := flag.Int("views", 1, "View limit (1-10)")

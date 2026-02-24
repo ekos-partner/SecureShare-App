@@ -64,12 +64,24 @@ GOOS=darwin GOARCH=arm64 go build -o secureshare-cli-mac .
 
 ## Usage
 
-### Basic Usage
+### Creating a Secret
 
-Encrypt a string and get a shareable link:
+There are two ways to create a secret using the CLI:
+
+#### 1. Direct Argument
+Pass the secret content as a command-line argument:
 
 ```bash
 ./secureshare-cli "My secret message"
+```
+
+#### 2. Using Pipes (stdin)
+Pipe the content from another command (ideal for files or multi-line text):
+
+```bash
+echo "Top Secret" | ./secureshare-cli
+# or
+cat id_rsa | ./secureshare-cli
 ```
 
 Output:
@@ -77,15 +89,21 @@ Output:
 https://your-instance.com/s/uuid-here#base64-key
 ```
 
-### Using Pipes
+### Retrieving a Secret
 
-Encrypt the contents of a file:
+You can retrieve and decrypt a secret directly in your terminal:
 
 ```bash
-cat id_rsa | ./secureshare-cli
+./secureshare-cli get https://your-instance.com/s/uuid-here#base64-key
 ```
 
-### Options
+If the secret is password-protected, the CLI will prompt you for it, or you can provide it via a flag:
+
+```bash
+./secureshare-cli get https://...#... -password "my-password"
+```
+
+### Options (for Creation)
 
 -   `-url`: URL of the SecureShare instance (default: `http://localhost:3000`).
 -   `-expire`: Expiration time in hours (default: 24).
