@@ -52,6 +52,11 @@ If that fails, try specifying a different output name:
 go build -o app .
 ```
 
+**For Linux (64-bit):**
+```bash
+GOOS=linux GOARCH=amd64 go build -o secureshare-cli-linux .
+```
+
 **For macOS (Apple Silicon):**
 ```bash
 GOOS=darwin GOARCH=arm64 go build -o secureshare-cli-mac .
@@ -69,7 +74,7 @@ Encrypt a string and get a shareable link:
 
 Output:
 ```
-https://your-instance.com/secret/uuid-here#base64-key
+https://your-instance.com/s/uuid-here#base64-key
 ```
 
 ### Using Pipes

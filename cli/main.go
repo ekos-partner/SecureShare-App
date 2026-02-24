@@ -14,7 +14,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"time" // [FIX] Dodano do obsługi timeoutu
+	"time"
 
 	"golang.org/x/crypto/pbkdf2"
 )
@@ -39,7 +39,7 @@ type CreateSecretResponse struct {
 	ID string `json:"id"`
 }
 
-// [FIX] Funkcja pomocnicza do ładnego wyświetlania błędów
+// Helper function to display errors and exit
 func failOnError(err error, msg string) {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %s: %v\n", msg, err)
@@ -54,7 +54,7 @@ func main() {
 	password := flag.String("password", "", "Optional password for extra protection")
 	flag.Parse()
 
-	// [FIX] Normalizacja URL (usuwanie końcowego slasha, jeśli użytkownik go podał)
+	// Normalize URL by removing trailing slash
 	cleanAPIURL := strings.TrimSuffix(*apiURL, "/")
 
 	// Read secret from stdin or arguments
@@ -68,7 +68,7 @@ func main() {
 			var err error
 			rawContent, err := io.ReadAll(os.Stdin)
 			failOnError(err, "reading from stdin")
-			// [FIX] Usuwamy białe znaki (np. newline z echo)
+			// Trim whitespace (e.g., newline from echo)
 			secretContent = bytes.TrimSpace(rawContent)
 		} else {
 			fmt.Println("Usage: echo 'secret' | secureshare-cli [options]")
@@ -139,7 +139,7 @@ func main() {
 	jsonData, err := json.Marshal(reqBody)
 	failOnError(err, "marshaling JSON")
 
-	// [FIX] Użycie własnego klienta HTTP z timeoutem (zamiast http.Post)
+	// Use custom HTTP client with timeout
 	client := &http.Client{
 		Timeout: 15 * time.Second,
 	}
@@ -163,8 +163,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	// 4. Output Link
-	// [FIX] Użycie cleanAPIURL
-	shareLink := fmt.Sprintf("%s/secret/%s#%s", cleanAPIURL, result.ID, keyBase64)
+	// Output the shareable link
+	shareLink := fmt.Sprintf("%s/s/%s#%s", cleanAPIURL, result.ID, keyBase64)
 	fmt.Println(shareLink)
 }

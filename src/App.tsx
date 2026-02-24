@@ -151,9 +151,10 @@ export default function App() {
         const path = globalThis.location.pathname;
         const hash = globalThis.location.hash;
         
-        if (path.includes('/s/')) {
+        if (path.includes('/s/') || path.includes('/secret/')) {
           // More robust ID extraction: handle trailing slashes and potential sub-paths
-          const parts = path.split('/s/');
+          const separator = path.includes('/s/') ? '/s/' : '/secret/';
+          const parts = path.split(separator);
           const id = parts[1]?.split('/')[0];
           const key = hash.replace('#', '');
           
