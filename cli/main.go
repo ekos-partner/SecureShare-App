@@ -21,12 +21,15 @@ import (
 	"golang.org/x/crypto/pbkdf2"
 )
 
-const (
+var (
 	defaultAPIURL = "http://localhost:3000"
-	keySize       = 32
-	ivSize        = 12
-	saltSize      = 16
-	iterations    = 100000
+)
+
+const (
+	keySize    = 32
+	ivSize     = 12
+	saltSize   = 16
+	iterations = 100000
 )
 
 type CreateSecretRequest struct {
@@ -60,6 +63,11 @@ func failOnError(err error, msg string) {
 }
 
 func main() {
+	// Initialize default API URL from environment variable if available
+	if envURL := os.Getenv("SECURESHARE_URL"); envURL != "" {
+		defaultAPIURL = envURL
+	}
+
 	// Simple subcommand detection
 	if len(os.Args) > 1 {
 		if os.Args[1] == "get" {
@@ -102,12 +110,14 @@ func printGeneralUsage() {
 	fmt.Println("\nUsage:")
 	fmt.Printf("  %s%s create [options] [secret]  - Create a new secret\n", examplePrefix, binaryName)
 	fmt.Printf("  %s%s get <url> [options]        - Retrieve and decrypt a secret\n", examplePrefix, binaryName)
+	fmt.Println("\nEnvironment Variables:")
+	fmt.Println("  SECURESHARE_URL  - Set default server URL (e.g., https://secureshare.example.com)")
 	fmt.Println("\nExamples:")
-	fmt.Printf("  %s%s \"Hello World\"\n", examplePrefix, binaryName)
+	fmt.Printf("  %s%s -url https://secureshare.example.com \"Hello World\"\n", examplePrefix, binaryName)
 	if runtime.GOOS == "windows" {
-		fmt.Printf("  echo \"Secret\" | %s%s -url https://secureshare.example.com\n", examplePrefix, binaryName)
+		fmt.Printf("  echo \"Secret\" | %s%s -url https://secureshare.example.com -expire 1\n", examplePrefix, binaryName)
 	} else {
-		fmt.Printf("  echo \"Secret\" | %s%s -url https://secureshare.example.com\n", examplePrefix, binaryName)
+		fmt.Printf("  echo \"Secret\" | %s%s -url https://secureshare.example.com -expire 1\n", examplePrefix, binaryName)
 	}
 	fmt.Printf("  %s%s get https://secureshare.example.com/s/uuid#key\n", examplePrefix, binaryName)
 	fmt.Printf("\nRun '%s%s create --help' or '%s%s get --help' for more details.\n", examplePrefix, binaryName, examplePrefix, binaryName)

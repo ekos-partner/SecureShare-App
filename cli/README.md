@@ -122,6 +122,20 @@ For a full list of options for each command, use the `--help` flag:
 ./secureshare-cli get --help
 ```
 
+### Environment Variables
+
+You can set the default server URL using the `SECURESHARE_URL` environment variable to avoid passing the `-url` flag every time:
+
+```bash
+# Linux/macOS
+export SECURESHARE_URL=https://secureshare.example.com
+./secureshare-cli "My secret message"
+
+# Windows (PowerShell)
+$env:SECURESHARE_URL="https://secureshare.example.com"
+.\secureshare-cli.exe "My secret message"
+```
+
 ### Options (for Creation)
 
 -   `-url`: URL of the SecureShare instance (default: `http://localhost:3000`).
