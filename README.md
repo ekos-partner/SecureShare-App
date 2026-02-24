@@ -29,6 +29,11 @@ To prevent automated guessing of access passwords:
 - **Permissions Policy**: Disables all unnecessary browser features (camera, microphone, geolocation) to reduce the attack surface.
 - **Opaque Errors**: The API returns identical 404 errors for non-existent, expired, or already burned secrets to prevent ID enumeration.
 
+### 5. Mobile-Friendly Sharing (QR Codes)
+- **Secure Transfer**: Easily transfer secrets to mobile devices by scanning a generated QR code.
+- **Offline Generation**: The QR code is generated entirely within the browser using `qrcode.react`, ensuring the secret URL is never sent to a third-party service.
+- **SVG Download**: Users can download the QR code as an SVG for secure offline distribution (e.g., printing on paper).
+
 ## 🔄 How it Works
 
 The security of SecureShare relies on the fact that the server is never aware of the decryption key.
