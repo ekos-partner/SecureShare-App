@@ -114,11 +114,7 @@ func printGeneralUsage() {
 	fmt.Println("  SECURESHARE_URL  - Set default server URL (e.g., https://secureshare.example.com)")
 	fmt.Println("\nExamples:")
 	fmt.Printf("  %s%s -url https://secureshare.example.com \"Hello World\"\n", examplePrefix, binaryName)
-	if runtime.GOOS == "windows" {
-		fmt.Printf("  echo \"Secret\" | %s%s -url https://secureshare.example.com -expire 1\n", examplePrefix, binaryName)
-	} else {
-		fmt.Printf("  echo \"Secret\" | %s%s -url https://secureshare.example.com -expire 1\n", examplePrefix, binaryName)
-	}
+	fmt.Printf("  echo \"Secret\" | %s%s -url https://secureshare.example.com -expire 1\n", examplePrefix, binaryName)
 	fmt.Printf("  %s%s get https://secureshare.example.com/s/uuid#key\n", examplePrefix, binaryName)
 	fmt.Printf("\nRun '%s%s create --help' or '%s%s get --help' for more details.\n", examplePrefix, binaryName, examplePrefix, binaryName)
 }
