@@ -1,4 +1,4 @@
-# 🛡️ SecureShare - Security Architecture
+# 🛡️ SecureShare - Share sensitive data securely. End-to-End encryption
 
 ![SecureShare Screenshot](screenshot.png)
 
