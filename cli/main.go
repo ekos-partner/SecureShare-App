@@ -58,16 +58,45 @@ func failOnError(err error, msg string) {
 }
 
 func main() {
-	if len(os.Args) > 1 && os.Args[1] == "get" {
-		handleGet()
-		return
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "get":
+			handleGet()
+			return
+		case "create":
+			handleCreate(os.Args[2:])
+			return
+		case "help", "-h", "--help":
+			printGeneralUsage()
+			return
+		}
 	}
-	handleCreate()
+
+	// Default to create for backward compatibility or if no subcommand is matched
+	// but flags are provided (e.g., secureshare-cli -url ...)
+	args := os.Args[1:]
+	handleCreate(args)
+}
+
+func printGeneralUsage() {
+	fmt.Println("SecureShare CLI - End-to-End Encrypted Secret Sharing")
+	fmt.Println("\nUsage:")
+	fmt.Println("  secureshare-cli create [options] [secret]  - Create a new secret")
+	fmt.Println("  secureshare-cli get <url> [options]        - Retrieve and decrypt a secret")
+	fmt.Println("\nExamples:")
+	fmt.Println("  secureshare-cli \"Hello World\"")
+	fmt.Println("  echo \"Secret\" | secureshare-cli -expire 1")
+	fmt.Println("  secureshare-cli get https://...#key")
+	fmt.Println("\nRun 'secureshare-cli create --help' or 'secureshare-cli get --help' for more details.")
 }
 
 func handleGet() {
 	getFlags := flag.NewFlagSet("get", flag.ExitOnError)
 	password := getFlags.String("password", "", "Password for the secret (if protected)")
+	getFlags.Usage = func() {
+		fmt.Println("Usage: secureshare-cli get <url> [options]")
+		getFlags.PrintDefaults()
+	}
 	getFlags.Parse(os.Args[2:])
 
 	if getFlags.NArg() < 1 {
@@ -178,20 +207,28 @@ func handleGet() {
 	fmt.Println(string(plaintext))
 }
 
-func handleCreate() {
-	apiURL := flag.String("url", defaultAPIURL, "API URL of the SecureShare instance")
-	expiration := flag.Int("expire", 24, "Expiration time in hours (1-168)")
-	views := flag.Int("views", 1, "View limit (1-10)")
-	password := flag.String("password", "", "Optional password for extra protection")
-	flag.Parse()
+func handleCreate(args []string) {
+	createFlags := flag.NewFlagSet("create", flag.ExitOnError)
+	apiURL := createFlags.String("url", defaultAPIURL, "API URL of the SecureShare instance")
+	expiration := createFlags.Int("expire", 24, "Expiration time in hours (1-168)")
+	views := createFlags.Int("views", 1, "View limit (1-10)")
+	password := createFlags.String("password", "", "Optional password for extra protection")
+	
+	createFlags.Usage = func() {
+		fmt.Println("Usage: secureshare-cli [create] [options] [secret]")
+		fmt.Println("       echo \"secret\" | secureshare-cli [create] [options]")
+		createFlags.PrintDefaults()
+	}
+	
+	createFlags.Parse(args)
 
 	// Normalize URL by removing trailing slash
 	cleanAPIURL := strings.TrimSuffix(*apiURL, "/")
 
 	// Read secret from stdin or arguments
 	var secretContent []byte
-	if len(flag.Args()) > 0 {
-		secretContent = []byte(strings.Join(flag.Args(), " "))
+	if len(createFlags.Args()) > 0 {
+		secretContent = []byte(strings.Join(createFlags.Args(), " "))
 	} else {
 		// Read from stdin
 		stat, _ := os.Stdin.Stat()
@@ -202,8 +239,7 @@ func handleCreate() {
 			// Trim whitespace (e.g., newline from echo)
 			secretContent = bytes.TrimSpace(rawContent)
 		} else {
-			fmt.Println("Usage: echo 'secret' | secureshare-cli [options]")
-			flag.PrintDefaults()
+			createFlags.Usage()
 			os.Exit(1)
 		}
 	}
