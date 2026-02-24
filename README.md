@@ -1,4 +1,4 @@
-# 🛡️ SecureShare - Security Architecture
+# 🛡️ SecureShare
 
 ![SecureShare Screenshot](screenshot.png)
 
