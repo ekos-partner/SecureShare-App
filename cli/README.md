@@ -72,21 +72,27 @@ There are two ways to create a secret using the CLI:
 Pass the secret content as a command-line argument:
 
 ```bash
-./secureshare-cli "My secret message"
+# Linux/macOS
+./secureshare-cli -url https://secureshare.example.com "My secret message"
+
+# Windows
+.\secureshare-cli.exe -url https://secureshare.example.com "My secret message"
 ```
 
 #### 2. Using Pipes (stdin)
 Pipe the content from another command (ideal for files or multi-line text):
 
 ```bash
-echo "Top Secret" | ./secureshare-cli
-# or
-cat id_rsa | ./secureshare-cli
+# Linux/macOS
+echo "Top Secret" | ./secureshare-cli -url https://secureshare.example.com
+
+# Windows
+echo "Top Secret" | .\secureshare-cli.exe -url https://secureshare.example.com
 ```
 
 Output:
 ```
-https://your-instance.com/s/uuid-here#base64-key
+https://secureshare.example.com/s/uuid-here#base64-key
 ```
 
 ### Retrieving a Secret
@@ -94,13 +100,26 @@ https://your-instance.com/s/uuid-here#base64-key
 You can retrieve and decrypt a secret directly in your terminal:
 
 ```bash
-./secureshare-cli get https://your-instance.com/s/uuid-here#base64-key
+# Linux/macOS
+./secureshare-cli get https://secureshare.example.com/s/uuid-here#base64-key
+
+# Windows
+.\secureshare-cli.exe get https://secureshare.example.com/s/uuid-here#base64-key
 ```
 
 If the secret is password-protected, the CLI will prompt you for it, or you can provide it via a flag:
 
 ```bash
-./secureshare-cli get https://...#... -password "my-password"
+./secureshare-cli get https://secureshare.example.com/s/uuid-here#base64-key -password "my-password"
+```
+
+### Help and Options
+
+For a full list of options for each command, use the `--help` flag:
+
+```bash
+./secureshare-cli create --help
+./secureshare-cli get --help
 ```
 
 ### Options (for Creation)

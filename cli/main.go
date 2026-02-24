@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
@@ -13,6 +14,7 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"runtime"
 	"strings"
 	"time"
 
@@ -89,16 +91,26 @@ func main() {
 }
 
 func printGeneralUsage() {
-	// Use a simpler approach without 'runtime' package for help
-	fmt.Println("SecureShare CLI - End-to-End Encrypted Secret Sharing")
+	binaryName := "secureshare-cli"
+	examplePrefix := "./"
+	if runtime.GOOS == "windows" {
+		binaryName = "secureshare-cli.exe"
+		examplePrefix = ".\\"
+	}
+
+	fmt.Printf("SecureShare CLI - End-to-End Encrypted Secret Sharing (%s/%s)\n", runtime.GOOS, runtime.GOARCH)
 	fmt.Println("\nUsage:")
-	fmt.Println("  secureshare-cli create [options] [secret]  - Create a new secret")
-	fmt.Println("  secureshare-cli get <url> [options]        - Retrieve and decrypt a secret")
+	fmt.Printf("  %s%s create [options] [secret]  - Create a new secret\n", examplePrefix, binaryName)
+	fmt.Printf("  %s%s get <url> [options]        - Retrieve and decrypt a secret\n", examplePrefix, binaryName)
 	fmt.Println("\nExamples:")
-	fmt.Println("  secureshare-cli \"Hello World\"")
-	fmt.Println("  echo \"Secret\" | secureshare-cli")
-	fmt.Println("  secureshare-cli get https://...#key")
-	fmt.Println("\nRun 'secureshare-cli create --help' for more options.")
+	fmt.Printf("  %s%s \"Hello World\"\n", examplePrefix, binaryName)
+	if runtime.GOOS == "windows" {
+		fmt.Printf("  echo \"Secret\" | %s%s -url https://secureshare.example.com\n", examplePrefix, binaryName)
+	} else {
+		fmt.Printf("  echo \"Secret\" | %s%s -url https://secureshare.example.com\n", examplePrefix, binaryName)
+	}
+	fmt.Printf("  %s%s get https://secureshare.example.com/s/uuid#key\n", examplePrefix, binaryName)
+	fmt.Printf("\nRun '%s%s create --help' or '%s%s get --help' for more details.\n", examplePrefix, binaryName, examplePrefix, binaryName)
 }
 
 func handleGet() {
@@ -108,14 +120,31 @@ func handleGet() {
 		fmt.Println("Usage: secureshare-cli get <url> [options]")
 		getFlags.PrintDefaults()
 	}
-	getFlags.Parse(os.Args[2:])
 
-	if getFlags.NArg() < 1 {
-		fmt.Println("Usage: secureshare-cli get <url> [-password <pw>]")
+	// Custom parsing to allow flags anywhere (e.g., after the URL)
+	var rawURL string
+	args := os.Args[2:]
+	var flagsToParse []string
+	for i := 0; i < len(args); i++ {
+		if strings.HasPrefix(args[i], "-") {
+			flagsToParse = append(flagsToParse, args[i])
+			// If it's a flag that takes a value and there is a next arg
+			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+				flagsToParse = append(flagsToParse, args[i+1])
+				i++
+			}
+		} else if rawURL == "" {
+			rawURL = args[i]
+		}
+	}
+	getFlags.Parse(flagsToParse)
+
+	if rawURL == "" {
+		fmt.Println("Error: Missing secret URL")
+		getFlags.Usage()
 		os.Exit(1)
 	}
 
-	rawURL := getFlags.Arg(0)
 	// Parse URL: https://domain.com/s/uuid#key
 	parts := strings.Split(rawURL, "#")
 	if len(parts) < 2 {
@@ -159,7 +188,9 @@ func handleGet() {
 		pw := *password
 		if pw == "" {
 			fmt.Print("Secret is password protected. Enter password: ")
-			fmt.Scanln(&pw)
+			reader := bufio.NewReader(os.Stdin)
+			input, _ := reader.ReadString('\n')
+			pw = strings.TrimSpace(input)
 		}
 
 		if meta.Salt == nil {

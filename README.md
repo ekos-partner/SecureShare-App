@@ -40,14 +40,19 @@ The security of SecureShare relies on the fact that the server is never aware of
 
 ```mermaid
 sequenceDiagram
-    participant U as User (Browser)
+    participant B as User (Browser)
+    participant C as User (CLI)
     participant S as Server (Node.js)
     participant D as Database (SQLite)
-    U->>U: Encrypt data (AES-GCM)
-    U->>S: Send Ciphertext
+    
+    Note over B,C: Local Encryption (AES-GCM)
+    B->>S: Send Ciphertext
+    C->>S: Send Ciphertext
     S->>D: Store Ciphertext & ID
-    S->>U: Return Secret ID
-    Note over U: Key is kept in URL hash (#)
+    S->>B: Return Secret ID
+    S->>C: Return Secret ID
+    
+    Note over B,C: Key is kept locally (# fragment or CLI memory)
 ```
 
 ## 🛡️ Threat Model

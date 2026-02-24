@@ -8,7 +8,7 @@ This document outlines the security assumptions, trust boundaries, and threat mi
 - **System Availability**: Protection against DDoS and resource exhaustion.
 
 ## 2. Trust Boundaries
-- **Client Browser**: Trusted to perform encryption and handle the decryption key.
+- **Client (Browser or CLI)**: Trusted to perform encryption and handle the decryption key.
 - **Network**: Untrusted. Assumed to be subject to eavesdropping (mitigated by HTTPS and E2EE).
 - **Server**: Partially trusted. Trusted to store encrypted blobs and enforce TTL/view limits, but NOT trusted with the decryption key.
 
