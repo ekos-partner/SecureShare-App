@@ -182,36 +182,38 @@ app.use((req, res, next) => {
  * PRODUCTION SECURITY MIDDLEWARE
  * Strict security headers for the standalone production environment.
  */
-app.use(helmet({
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", (req, res) => `'nonce-${res.locals.nonce}'`],
-      // Allow inline styles for React/Motion
-      styleSrc: ["'self'", "'unsafe-inline'", (req, res) => `'nonce-${res.locals.nonce}'`, "https://fonts.googleapis.com"],
-      fontSrc: ["'self'", "https://fonts.gstatic.com"],
-      imgSrc: ["'self'", "data:", "https://picsum.photos", "blob:"],
-      // Restrict connectSrc
-      connectSrc: ["'self'"],
-      frameAncestors: ["'self'", "https://*.google.com", "https://*.run.app"],
+if (process.env.NODE_ENV === "production") {
+  app.use(helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", (req, res) => `'nonce-${res.locals.nonce}'`],
+        // Allow inline styles for React/Motion
+        styleSrc: ["'self'", "'unsafe-inline'", (req, res) => `'nonce-${res.locals.nonce}'`, "https://fonts.googleapis.com"],
+        fontSrc: ["'self'", "https://fonts.gstatic.com"],
+        imgSrc: ["'self'", "data:", "https://picsum.photos", "blob:"],
+        // Restrict connectSrc
+        connectSrc: ["'self'"],
+        frameAncestors: ["'self'", "https://*.google.com", "https://*.run.app"],
+      },
     },
-  },
-  hsts: {
-    maxAge: 31536000,
-    includeSubDomains: true,
-    preload: true,
-  },
-  referrerPolicy: { policy: "no-referrer" },
-  noSniff: true,
-  crossOriginEmbedderPolicy: false,
-  frameguard: { action: "sameorigin" },
-}));
+    hsts: {
+      maxAge: 31536000,
+      includeSubDomains: true,
+      preload: true,
+    },
+    referrerPolicy: { policy: "no-referrer" },
+    noSniff: true,
+    crossOriginEmbedderPolicy: false,
+    frameguard: { action: "sameorigin" },
+  }));
 
-// Add the Permissions-Policy header manually
-app.use((req, res, next) => {
-  res.setHeader('Permissions-Policy', 'accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()');
-  next();
-});
+  // Add the Permissions-Policy header manually
+  app.use((req, res, next) => {
+    res.setHeader('Permissions-Policy', 'accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()');
+    next();
+  });
+}
 
 // CORS Configuration
 const allowedOrigin = process.env.APP_URL || false; 
@@ -414,7 +416,10 @@ const startServer = async () => {
     // Development mode: Use Vite middleware and EJS for nonce injection
     const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: { 
+        middlewareMode: true,
+        hmr: false // Disable HMR as per platform guidelines
+      },
       appType: "spa",
     });
     app.use(vite.middlewares);
