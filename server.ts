@@ -261,6 +261,10 @@ const authLimiter = rateLimit({
  */
 
 // Create a new secret
+app.get("/api/health", (req, res) => {
+  res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
 app.post("/api/secrets", createLimiter, (req, res) => {
   const result = CreateSecretSchema.safeParse(req.body);
   if (!result.success) {
@@ -440,10 +444,6 @@ const startServer = async () => {
   }
 
   // Security.txt implementation (RFC 9116)
-  app.get("/api/health", (req, res) => {
-    res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
-  });
-
   app.get(["/.well-known/security.txt", "/security.txt"], (req, res) => {
     const securityTxt = `Contact: mailto:security@${req.hostname}
 Expires: ${new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString()}
