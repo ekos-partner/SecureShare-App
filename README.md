@@ -1,40 +1,47 @@
-# 🛡️ SecureShare
+# 🛡️ SecureShare: Share Secrets Securely
+
+**A simple way to send sensitive information with end-to-end encryption. What you share is for the recipient's eyes only.**
 
 ![SecureShare Screenshot](screenshot.png)
 
+## What is SecureShare?
+
+Have you ever needed to send a password, API key, or private note and felt uneasy doing it over email or chat? SecureShare solves this problem.
+
+It's a simple tool that lets you create a **secure, one-time link** for your sensitive data. The link automatically expires after the first access or after a set time, ensuring your information doesn't stay on the internet forever.
+
+### Key Features (in simple terms):
+
+-   **🔒 Total Privacy (Zero-Knowledge)**: We can't read your secrets, even if we wanted to. All encryption happens in your browser.
+-   **🔥 Self-Destructing Links**: Links are automatically deleted from the server after they are used.
+-   **🔑 Password Protection**: You can add an extra layer of security with a password.
+-   **📱 Easy Mobile Sharing**: Generate a QR code to securely transfer the link to your mobile device.
+
+---
+
+## For the Technically Curious: Security Architecture
+
 SecureShare is a high-security, zero-knowledge platform for sharing sensitive information. It is designed with a "Privacy by Design" approach, ensuring that even the server hosting the data cannot access the content.
 
-## 🔐 Core Security Principles
+### 🔐 Core Security Principles
 
-### 1. End-to-End Encryption (E2EE)
+#### 1. End-to-End Encryption (E2EE)
 All encryption and decryption happen exclusively in the user's browser.
 - **Algorithm**: AES-256-GCM (Authenticated Encryption).
 - **Key Storage**: The unique decryption key is generated on the client and stored in the URL fragment (the part after the `#`). 
 - **Zero-Knowledge**: Per W3C standards, the URL fragment is **never sent to the server**. Our infrastructure only sees the encrypted blob, never the key.
 
-### 2. Strong Key Derivation (KDF)
+#### 2. Strong Key Derivation (KDF)
 When an optional access password is set, we don't use it directly as a key.
-- **Mechanism**: PBKDF2 (Password-Based Key Derivation Function 2).
-- **Parameters**: 100,000 iterations with SHA-256.
+- **Mechanism**: PBKDF2 with 100,000 iterations and SHA-256.
 - **Salt**: Every secret has a unique, cryptographically secure random salt generated on the client.
 
-### 3. Brute-Force Protection (Burn-on-Fail)
+#### 3. Brute-Force Protection
 To prevent automated guessing of access passwords:
 - **Limit**: A secret is **permanently deleted** from the database after 3 failed password attempts.
 - **Rate Limiting**: Strict IP-based and global rate limits are enforced on all API endpoints.
 
-### 4. Hardened Infrastructure
-- **CSP with Nonce**: A strict Content Security Policy prevents Cross-Site Scripting (XSS). We use unique nonces for every request, disabling `unsafe-inline` and `unsafe-eval`.
-- **HSTS**: HTTP Strict Transport Security ensures all connections are forced over HTTPS.
-- **Permissions Policy**: Disables all unnecessary browser features (camera, microphone, geolocation) to reduce the attack surface.
-- **Opaque Errors**: The API returns identical 404 errors for non-existent, expired, or already burned secrets to prevent ID enumeration.
-
-### 5. Mobile-Friendly Sharing (QR Codes)
-- **Secure Transfer**: Easily transfer secrets to mobile devices by scanning a generated QR code.
-- **Offline Generation**: The QR code is generated entirely within the browser using `qrcode.react`, ensuring the secret URL is never sent to a third-party service.
-- **SVG Download**: Users can download the QR code as an SVG for secure offline distribution (e.g., printing on paper).
-
-## 🔄 How it Works
+### 🔄 How it Works (Technically)
 
 The security of SecureShare relies on the fact that the server is never aware of the decryption key.
 
