@@ -1,11 +1,12 @@
 node_modules
 dist
 .git
+*.log
 .env
-data
+.env.*
 *.db
 *.db-journal
-cli/secureshare-cli
-cli/secureshare-cli.exe
-cli/secureshare-cli-linux
-cli/secureshare-cli-mac
+data/
+.DS_Store
+coverage/
+cli/secureshare-cli*
