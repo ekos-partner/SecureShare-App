@@ -71,13 +71,31 @@ For detailed instructions on deploying to GCP, Azure, VPS, or using Docker with 
 **IMPORTANT**: Before deploying, read the [Security Limitations](./LIMITATIONS.md) and [Threat Model](./THREAT_MODEL.md) to understand what this app protects against and what it does not.
 
 ### Quick Docker Start (Local)
-```bash
-# Build the image
-docker build -t secureshare .
 
-# Run the container (maps port 3000 and persists data to ./data)
-docker run -d -p 3000:3000 -v $(pwd)/data:/app/data secureshare
+The recommended way to run SecureShare on **any system** is using **Docker Compose**:
+
+```bash
+# Start the application (Universal for Linux, macOS, and Windows)
+docker compose up -d
 ```
+
+> **Tip**: Docker will automatically create a `data` folder in your current directory to store the encrypted database.
+
+#### Manual Docker Commands
+
+If you prefer to use standard Docker commands, first build the image:
+
+```bash
+docker build -t secureshare .
+```
+
+Then run the container using the command for your specific system:
+
+| System / Shell | Command |
+| :--- | :--- |
+| **Linux / macOS / Git Bash** | `docker run -d -p 3000:3000 -v $(pwd)/data:/app/data secureshare` |
+| **Windows (PowerShell)** | `docker run -d -p 3000:3000 -v "${PWD}/data:/app/data" secureshare` |
+| **Windows (Command Prompt)** | `docker run -d -p 3000:3000 -v "%cd%/data:/app/data" secureshare` |
 
 ## 🧪 Development & Testing
 ```bash
