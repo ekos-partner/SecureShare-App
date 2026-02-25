@@ -1,69 +1,50 @@
-# Stage 1: Build the frontend
-# We use a multi-stage build to keep the final image small.
+# Stage 1: Build the frontend and prepare dependencies
 FROM node:20-slim AS builder
 WORKDIR /app
 
-# Install build tools for native modules (better-sqlite3 requires python/make/g++)
-# We also run apt-get upgrade to patch OS-level vulnerabilities (e.g., gnutls, zlib)
-RUN apt-get update && apt-get upgrade -y && apt-get install -y \
+# Install build tools for native modules (better-sqlite3)
+RUN apt-get update && apt-get install -y \
     python3 \
     make \
     g++ \
-    && apt-get autoremove -y \
-    && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
 COPY package*.json ./
-# Install ALL dependencies (including devDependencies) to build the frontend
+# Install ALL dependencies (including devDependencies)
 RUN npm install
 
 COPY . .
-# Build the React frontend (Vite) -> outputs to /dist
+# Build the React frontend
 RUN npm run build
 
 # Stage 2: Production environment
-# This is the final image that will run in production.
 FROM node:20-slim
 WORKDIR /app
 
-# Install runtime dependencies for native modules (better-sqlite3)
-# We also run apt-get upgrade to patch OS-level vulnerabilities in the final image
-RUN apt-get update && apt-get upgrade -y && apt-get install -y \
-    python3 \
-    make \
-    g++ \
-    && apt-get autoremove -y \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy package files
-COPY package*.json ./
-
-# Install dependencies. 
-# NOTE: We install devDependencies too because we use 'tsx' to run the server.
-# In a strict production setup, you might want to transpile server.ts to JS and use 'node'.
-RUN npm install
-
-# Set production environment variable
+# Set production environment variables
 ENV NODE_ENV=production
-
-# Copy built frontend assets from the builder stage
-COPY --from=builder /app/dist ./dist
-
-# Copy backend source files
-COPY server.ts .
-COPY tsconfig.json .
-# We need src/lib because server.ts might import shared types or logic
-COPY src/lib ./src/lib
-COPY index.html .
-
-# Create a directory for the SQLite database
-# We set 777 permissions to avoid permission issues in some container environments (like OpenShift)
-RUN mkdir -p /app/data && chmod 777 /app/data
 ENV DB_PATH=/app/data/secrets.db
 
-# Expose the port the app runs on
+# Create data directory and set ownership to 'node' user
+RUN mkdir -p /app/data && chown -R node:node /app/data
+
+# Copy built assets and dependencies from builder
+# We use --chown to ensure the 'node' user can read/execute these files
+COPY --from=builder --chown=node:node /app/dist ./dist
+COPY --from=builder --chown=node:node /app/node_modules ./node_modules
+COPY --from=builder --chown=node:node /app/package*.json ./
+COPY --from=builder --chown=node:node /app/server.ts /app/tsconfig.json /app/index.html ./
+COPY --from=builder --chown=node:node /app/src/lib ./src/lib
+
+# Switch to non-root user for security
+USER node
+
+# Healthcheck to ensure the API is responding
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD node -e "require('http').get('http://localhost:3000/api/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1))"
+
+# Expose the application port
 EXPOSE 3000
 
-# Start the server using the npm start script
+# Start the server
 CMD ["npm", "start"]
