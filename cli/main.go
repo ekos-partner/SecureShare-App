@@ -268,15 +268,31 @@ func handleCreate(args []string) {
 		createFlags.PrintDefaults()
 	}
 	
-	createFlags.Parse(args)
+	// Custom parsing to allow flags anywhere
+	var secretParts []string
+	var flagsToParse []string
+	for i := 0; i < len(args); i++ {
+		if strings.HasPrefix(args[i], "-") {
+			flagsToParse = append(flagsToParse, args[i])
+			// If it's a flag that takes a value and there is a next arg
+			// All our flags (url, expire, views, password) take values
+			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "-") {
+				flagsToParse = append(flagsToParse, args[i+1])
+				i++
+			}
+		} else {
+			secretParts = append(secretParts, args[i])
+		}
+	}
+	createFlags.Parse(flagsToParse)
 
 	// Normalize URL by removing trailing slash
 	cleanAPIURL := strings.TrimSuffix(*apiURL, "/")
 
 	// Read secret from stdin or arguments
 	var secretContent []byte
-	if len(createFlags.Args()) > 0 {
-		secretContent = []byte(strings.Join(createFlags.Args(), " "))
+	if len(secretParts) > 0 {
+		secretContent = []byte(strings.Join(secretParts, " "))
 	} else {
 		// Read from stdin
 		stat, _ := os.Stdin.Stat()
