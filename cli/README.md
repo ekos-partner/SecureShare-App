@@ -15,6 +15,29 @@ A command-line interface for SecureShare, written in Go. This tool allows you to
 
 - [Go](https://go.dev/dl/) 1.21 or later.
 
+### Quick Start by OS
+
+Download the appropriate binary for your system and follow these steps:
+
+#### 🍎 macOS (Apple Silicon / M1 / M2 / M3)
+1.  **Grant permissions**: `chmod +x secureshare-cli-mac-arm64`
+2.  **Bypass Gatekeeper**: `xattr -d com.apple.quarantine secureshare-cli-mac-arm64`
+3.  **Run**: `./secureshare-cli-mac-arm64`
+
+#### 🍎 macOS (Intel)
+1.  **Grant permissions**: `chmod +x secureshare-cli-mac-intel`
+2.  **Bypass Gatekeeper**: `xattr -d com.apple.quarantine secureshare-cli-mac-intel`
+3.  **Run**: `./secureshare-cli-mac-intel`
+
+#### 🐧 Linux
+1.  **Grant permissions**: `chmod +x secureshare-cli-linux`
+2.  **Run**: `./secureshare-cli-linux`
+
+#### 🪟 Windows
+1.  **Run**: `.\secureshare-cli.exe`
+
+---
+
 ### Building from Source
 
 1.  Navigate to the `cli` directory:
@@ -38,12 +61,27 @@ You can build binaries for other platforms from your current machine.
 GOOS=windows GOARCH=amd64 go build -o secureshare-cli.exe .
 ```
 
+**For Linux (64-bit):**
+```bash
+GOOS=linux GOARCH=amd64 go build -o secureshare-cli-linux .
+```
+
+**For macOS (Apple Silicon):**
+```bash
+GOOS=darwin GOARCH=arm64 go build -o secureshare-cli-mac-arm64 .
+```
+
+**For macOS (Intel):**
+```bash
+GOOS=darwin GOARCH=amd64 go build -o secureshare-cli-mac-intel .
+```
+
 ### Troubleshooting Build Errors
 
 If you encounter an error like `open secureshare-cli: no such file or directory`, try cleaning the directory first:
 
 ```bash
-rm -f secureshare-cli secureshare-cli.exe
+rm -f secureshare-cli secureshare-cli.exe secureshare-cli-linux secureshare-cli-mac-arm64 secureshare-cli-mac-intel
 go build .
 ```
 
