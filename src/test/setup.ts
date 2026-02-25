@@ -11,11 +11,14 @@ beforeAll(() => {
     });
   }
 
-  // Polyfill for TextEncoder/TextDecoder (sometimes missing in jsdom/node interaction)
+  // Polyfill for TextEncoder
   if (!globalThis.TextEncoder) {
     globalThis.TextEncoder = TextEncoder;
   }
+
+  // Polyfill for TextDecoder
+  // FIX: Cast to the correct type instead of 'any' to satisfy ESLint
   if (!globalThis.TextDecoder) {
-    globalThis.TextDecoder = TextDecoder as any;
+    globalThis.TextDecoder = TextDecoder as typeof globalThis.TextDecoder;
   }
 });
