@@ -1,0 +1,11 @@
+node_modules
+dist
+.git
+.env
+data
+*.db
+*.db-journal
+cli/secureshare-cli
+cli/secureshare-cli.exe
+cli/secureshare-cli-linux
+cli/secureshare-cli-mac
