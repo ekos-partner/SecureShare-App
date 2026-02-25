@@ -1,0 +1,12 @@
+node_modules
+dist
+.git
+*.log
+.env
+.env.*
+*.db
+*.db-journal
+data/
+.DS_Store
+coverage/
+cli/secureshare-cli*

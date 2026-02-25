@@ -15,11 +15,17 @@ RUN npm install
 
 COPY . .
 # Build the React frontend
-RUN npm run build
+RUN npm run build && npm prune --production
 
 # Stage 2: Production environment
 FROM node:20-slim
 WORKDIR /app
+
+# Install runtime OS updates to patch vulnerabilities
+RUN apt-get update && apt-get upgrade -y \
+    && apt-get autoremove -y \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
 # Set production environment variables
 ENV NODE_ENV=production
