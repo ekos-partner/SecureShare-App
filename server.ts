@@ -780,6 +780,7 @@ const startServer = async () => {
       app.set('view engine', 'html');
       app.set('views', distPath);
 
+      // app.use(express.static(process.cwd())); // Moved to top
       app.use(express.static(distPath));
       app.get("*", (req, res) => {
         res.render(path.resolve(distPath, "index.html"), { nonce: res.locals.nonce });
@@ -797,6 +798,7 @@ const startServer = async () => {
       },
       appType: "spa",
     });
+    // app.use(express.static(process.cwd())); // Moved to top
     app.use(vite.middlewares);
     app.get('*', async (req, res, next) => {
       try {

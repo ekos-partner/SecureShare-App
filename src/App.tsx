@@ -28,8 +28,7 @@ import { twMerge } from 'tailwind-merge';
 import { QRCodeSVG } from 'qrcode.react';
 import AdminDashboard from './pages/AdminDashboard';
 import ApiDocs from './pages/ApiDocs';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -130,32 +129,10 @@ export default function App() {
   const [remainingViews, setRemainingViews] = useState<number | null>(null);
   const [showInfo, setShowInfo] = useState(false);
   const [isDownloadingQR, setIsDownloadingQR] = useState(false);
-  const [readmeContent, setReadmeContent] = useState('');
+
   const qrCodeRef = React.useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    const fetchReadme = async () => {
-      try {
-        const res = await fetch('/README.md');
-        const text = await res.text();
-        // Replace placeholders with dynamic app URL
-        const appUrl = getAppOrigin();
-        const processedText = text
-          .replace(/\.\/ADMIN_GUIDE\.md/g, `[Admin Guide](${appUrl}/admin)`)
-          .replace(/\.\/API_REFERENCE\.md/g, `[API Reference](${appUrl}/docs)`)
-          .replace(/\.\/cli\/README\.md/g, `[CLI Guide](https://github.com/GoogleCloudPlatform/SecureShare/blob/main/cli/README.md)`)
-          .replace(/\.\/DEPLOYMENT\.md/g, `[Deployment Guide](https://github.com/GoogleCloudPlatform/SecureShare/blob/main/DEPLOYMENT.md)`)
-          .replace(/\.\/SECURITY_LIMITATIONS\.md/g, `[Security Limitations](https://github.com/GoogleCloudPlatform/SecureShare/blob/main/SECURITY_LIMITATIONS.md)`)
-          .replace(/\.\/THREAT_MODEL\.md/g, `[Threat Model](https://github.com/GoogleCloudPlatform/SecureShare/blob/main/THREAT_MODEL.md)`);
 
-        setReadmeContent(processedText);
-      } catch (err) {
-        console.error('Failed to fetch README.md:', err);
-        setReadmeContent('Failed to load additional information.');
-      }
-    };
-    fetchReadme();
-  }, []);
 
   /**
    * THEME INITIALIZATION
@@ -858,14 +835,41 @@ export default function App() {
                   <X className="w-5 h-5 text-slate-400 dark:text-slate-500" />
                 </button>
               </div>
-              <div className="p-6 space-y-4 text-slate-600 dark:text-slate-400 prose dark:prose-invert max-w-none">
-                {readmeContent ? (
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{readmeContent}</ReactMarkdown>
-                ) : (
-                  <p>Loading information...</p>
-                )}
+              <div className="p-6 space-y-4 text-slate-600 dark:text-slate-400">
+                <section>
+                  <h4 className="font-semibold text-slate-900 dark:text-white mb-1">End-to-End Encryption</h4>
+                  <p className="text-sm">
+                    Your data is encrypted in your browser before being sent to the server. The decryption key is part of the URL fragment (#), which is never sent to our servers.
+                  </p>
+                </section>
+                <section>
+                  <h4 className="font-semibold text-slate-900 dark:text-white mb-1">Zero-Knowledge Storage</h4>
+                  <p className="text-sm">
+                    We only store encrypted blobs. Without the unique link key, even we cannot read your secrets.
+                  </p>
+                </section>
+                <section>
+                  <h4 className="font-semibold text-slate-900 dark:text-white mb-1">Advanced Protection</h4>
+                  <p className="text-sm">
+                    Strict Content Security Policy (CSP) prevents XSS attacks, while HSTS forces secure connections. Brute-force protection automatically deletes secrets after 3 failed password attempts.
+                  </p>
+                </section>
+                <section>
+                  <h4 className="font-semibold text-slate-900 dark:text-white mb-1">Automatic Destruction</h4>
+                  <p className="text-sm">
+                    Secrets are automatically deleted after the view limit is reached or the expiration time passes. Once deleted, they are gone forever.
+                  </p>
+                </section>
               </div>
               <div className="p-6 bg-slate-50 dark:bg-slate-900/50 text-center border-t dark:border-slate-800">
+                <a 
+                  href="https://github.com/ekos-cyber/SecureShare-App"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline font-medium mb-4 block"
+                >
+                  View Public GitHub Repository
+                </a>
                 <button 
                   onClick={() => setShowInfo(false)}
                   className="px-6 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 transition-colors"
