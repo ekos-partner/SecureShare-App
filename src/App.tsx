@@ -858,31 +858,12 @@ export default function App() {
                   <X className="w-5 h-5 text-slate-400 dark:text-slate-500" />
                 </button>
               </div>
-              <div className="p-6 space-y-4 text-slate-600 dark:text-slate-400">
-                <section>
-                  <h4 className="font-semibold text-slate-900 dark:text-white mb-1">End-to-End Encryption</h4>
-                  <p className="text-sm">
-                    Your data is encrypted in your browser before being sent to the server. The decryption key is part of the URL fragment (#), which is never sent to our servers.
-                  </p>
-                </section>
-                <section>
-                  <h4 className="font-semibold text-slate-900 dark:text-white mb-1">Zero-Knowledge Storage</h4>
-                  <p className="text-sm">
-                    We only store encrypted blobs. Without the unique link key, even we cannot read your secrets.
-                  </p>
-                </section>
-                <section>
-                  <h4 className="font-semibold text-slate-900 dark:text-white mb-1">Advanced Protection</h4>
-                  <p className="text-sm">
-                    Strict Content Security Policy (CSP) prevents XSS attacks, while HSTS forces secure connections. Brute-force protection automatically deletes secrets after 3 failed password attempts.
-                  </p>
-                </section>
-                <section>
-                  <h4 className="font-semibold text-slate-900 dark:text-white mb-1">Automatic Destruction</h4>
-                  <p className="text-sm">
-                    Secrets are automatically deleted after the view limit is reached or the expiration time passes. Once deleted, they are gone forever.
-                  </p>
-                </section>
+              <div className="p-6 space-y-4 text-slate-600 dark:text-slate-400 prose dark:prose-invert max-w-none">
+                {readmeContent ? (
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>{readmeContent}</ReactMarkdown>
+                ) : (
+                  <p>Loading information...</p>
+                )}
               </div>
               <div className="p-6 bg-slate-50 dark:bg-slate-900/50 text-center border-t dark:border-slate-800">
                 <button 
