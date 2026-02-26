@@ -24,6 +24,10 @@ import cors from "cors";
 import { z } from "zod";
 import crypto from 'node:crypto';
 import ejs from 'ejs';
+import jwt from 'jsonwebtoken';
+import cookieParser from 'cookie-parser';
+import { authenticator } from 'otplib';
+import QRCode from 'qrcode';
 
 /**
  * DATABASE INITIALIZATION
@@ -72,6 +76,51 @@ db.exec(`
     view_count INTEGER DEFAULT 0,
     failed_attempts INTEGER DEFAULT 0,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )
+`);
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS api_keys (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    key_hash TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    last_used_at DATETIME,
+    usage_count INTEGER DEFAULT 0
+  )
+`);
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  )
+`);
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    username TEXT UNIQUE NOT NULL,
+    password_hash TEXT NOT NULL,
+    is_root INTEGER DEFAULT 0,
+    must_change_password INTEGER DEFAULT 0,
+    totp_secret TEXT,
+    is_totp_enabled INTEGER DEFAULT 0,
+    failed_attempts INTEGER DEFAULT 0,
+    lockout_until DATETIME,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )
+`);
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS audit_logs (
+    id TEXT PRIMARY KEY,
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+    action TEXT NOT NULL,
+    user_id TEXT,
+    username TEXT,
+    ip_address TEXT,
+    details TEXT
   )
 `);
 
@@ -157,6 +206,40 @@ function handleViewLimit(db: Database.Database, secret: any) {
 
 const app = express();
 const PORT = Number.parseInt(process.env.PORT || "3000", 10);
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
+const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(32).toString('hex');
+
+/**
+ * AUDIT LOGGING HELPER
+ */
+function logAction(action: string, userId: string | null, username: string | null, ip: string, details: string = "") {
+  try {
+    db.prepare("INSERT INTO audit_logs (id, action, user_id, username, ip_address, details) VALUES (?, ?, ?, ?, ?, ?)")
+      .run(uuidv4(), action, userId, username, ip, details);
+  } catch (err) {
+    console.error("Failed to log action:", err);
+  }
+}
+
+/**
+ * INITIALIZE ROOT USER
+ * If no users exist, create the root user from ADMIN_PASSWORD
+ */
+function initializeRootUser() {
+  const userCount = db.prepare("SELECT COUNT(*) as count FROM users").get() as { count: number };
+  if (userCount.count === 0) {
+    const id = uuidv4();
+    const initialPassword = ADMIN_PASSWORD || 'admin'; // Fallback to 'admin' if ENV var not set
+    const hash = crypto.createHash('sha256').update(initialPassword).digest('hex');
+    db.prepare("INSERT INTO users (id, username, password_hash, is_root, must_change_password) VALUES (?, ?, ?, ?, ?)")
+      .run(id, 'admin', hash, 1, 1); // Force password change on first login
+    console.log(`[Security] Root admin user initialized. Password set from ENV or default. Must change password on first login.`);
+    logAction("SYSTEM_INIT", id, "admin", "127.0.0.1", "Root user created from ENV or default");
+  }
+}
+initializeRootUser();
+
+app.use(cookieParser());
 
 // Disable X-Powered-By to prevent technology fingerprinting (Proxy Disclosure)
 app.disable('x-powered-by');
@@ -226,6 +309,69 @@ if (allowedOrigin) {
 }
 app.use(express.json({ limit: '1.1mb' }));
 
+interface UserRow {
+  id: string;
+  username: string;
+  password_hash: string;
+  is_root: number;
+  must_change_password: number;
+  totp_secret: string | null;
+  is_totp_enabled: number;
+  failed_attempts: number;
+  lockout_until: string | null;
+  created_at: string;
+}
+
+/**
+ * ADMIN AUTHENTICATION MIDDLEWARE
+ */
+const authenticateAdmin = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const token = req.cookies.admin_token;
+  if (!token) return res.status(401).json({ error: "Unauthorized" });
+
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET) as { userId: string, username: string };
+    
+    // Verify user still exists
+    const user = db.prepare("SELECT * FROM users WHERE id = ?").get(decoded.userId) as UserRow | undefined;
+    if (!user) return res.status(401).json({ error: "User no longer exists" });
+
+    (req as AuthenticatedRequest).user = user;
+    next();
+  } catch {
+    res.status(401).json({ error: "Invalid token" });
+  }
+};
+
+/**
+ * API KEY VERIFICATION MIDDLEWARE
+ */
+const verifyApiKey = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+  const apiKey = req.headers['x-api-key'] as string;
+  
+  // If no API key is provided, we allow it (for the web UI/CLI backward compatibility)
+  // but we could enforce it for specific routes if needed.
+  if (!apiKey) return next();
+
+  try {
+    const [id, rawKey] = apiKey.split('.');
+    if (!id || !rawKey) return res.status(401).json({ error: "Invalid API Key format" });
+
+    const keyData = db.prepare("SELECT * FROM api_keys WHERE id = ?").get(id) as { key_hash: string } | undefined;
+    if (!keyData) return res.status(401).json({ error: "Invalid API Key" });
+
+    const hash = crypto.createHash('sha256').update(rawKey).digest('hex');
+    if (hash !== keyData.key_hash) return res.status(401).json({ error: "Invalid API Key" });
+
+    // Update usage stats
+    db.prepare("UPDATE api_keys SET last_used_at = CURRENT_TIMESTAMP, usage_count = usage_count + 1 WHERE id = ?").run(id);
+    
+    next();
+  } catch {
+    res.status(401).json({ error: "API Key verification failed" });
+  }
+};
+
 /**
  * RATE LIMITING
  * Prevents abuse while allowing for automated security testing.
@@ -265,7 +411,232 @@ app.get("/api/health", (req, res) => {
   res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-app.post("/api/secrets", createLimiter, (req, res) => {
+/**
+ * ADMIN API ROUTES
+ */
+app.post("/api/admin/login", authLimiter, (req, res) => {
+  const { username, password, totpToken } = req.body;
+  const ip = req.ip || "unknown";
+
+  if (!username || !password) {
+    return res.status(400).json({ error: "Username and password required" });
+  }
+
+  const user = db.prepare("SELECT * FROM users WHERE username = ?").get(username) as UserRow | undefined;
+  
+  if (!user) {
+    logAction("LOGIN_FAILED", null, username, ip, "User not found");
+    return res.status(401).json({ error: "Invalid credentials" });
+  }
+
+  // Check lockout
+  if (user.lockout_until && new Date(user.lockout_until) > new Date()) {
+    return res.status(403).json({ error: "Account locked. Please try again later." });
+  }
+
+  const hash = crypto.createHash('sha256').update(password).digest('hex');
+  if (hash !== user.password_hash) {
+    const attempts = user.failed_attempts + 1;
+    let lockoutUntil = null;
+    if (attempts >= 5) {
+      lockoutUntil = new Date(Date.now() + 15 * 60 * 1000).toISOString();
+    }
+    db.prepare("UPDATE users SET failed_attempts = ?, lockout_until = ? WHERE id = ?").run(attempts, lockoutUntil, user.id);
+    logAction("LOGIN_FAILED", user.id, username, ip, `Wrong password. Attempt ${attempts}`);
+    return res.status(401).json({ error: "Invalid credentials" });
+  }
+
+  // Check TOTP
+  if (user.is_totp_enabled) {
+    if (!totpToken) {
+      return res.status(200).json({ requiresTotp: true });
+    }
+    const isValid = authenticator.check(totpToken, user.totp_secret);
+    if (!isValid) {
+      logAction("LOGIN_FAILED_TOTP", user.id, username, ip, "Invalid TOTP token");
+      return res.status(401).json({ error: "Invalid TOTP token" });
+    }
+  }
+
+  // Success
+  db.prepare("UPDATE users SET failed_attempts = 0, lockout_until = NULL WHERE id = ?").run(user.id);
+  
+  const token = jwt.sign({ userId: user.id, username: user.username }, JWT_SECRET, { expiresIn: '24h' });
+  res.cookie('admin_token', token, { 
+    httpOnly: true, 
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'strict',
+    maxAge: 24 * 60 * 60 * 1000 
+  });
+
+  logAction("LOGIN_SUCCESS", user.id, username, ip);
+  return res.json({ 
+    success: true, 
+    mustChangePassword: !!user.must_change_password,
+    username: user.username
+  });
+});
+
+app.post("/api/admin/change-password", authenticateAdmin, (req, res) => {
+  const { newPassword } = req.body;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const user = (req as any).user as UserRow;
+
+  if (!newPassword || newPassword.length < 8) {
+    return res.status(400).json({ error: "Password must be at least 8 characters long" });
+  }
+
+  const hash = crypto.createHash('sha256').update(newPassword).digest('hex');
+  db.prepare("UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?").run(hash, user.id);
+  
+  logAction("PASSWORD_CHANGED", user.id, user.username, req.ip || "unknown");
+  res.json({ success: true });
+});
+
+app.get("/api/admin/users", authenticateAdmin, (req, res) => {
+  const users = db.prepare("SELECT id, username, is_root, must_change_password, is_totp_enabled, created_at FROM users").all();
+  res.json(users);
+});
+
+app.post("/api/admin/users", authenticateAdmin, (req, res) => {
+  const { username, password } = req.body;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const admin = (req as any).user as UserRow;
+
+  if (!username || !password || password.length < 8) {
+    return res.status(400).json({ error: "Invalid username or password" });
+  }
+
+  try {
+    const id = uuidv4();
+    const hash = crypto.createHash('sha256').update(password).digest('hex');
+    db.prepare("INSERT INTO users (id, username, password_hash, must_change_password) VALUES (?, ?, ?, 1)")
+      .run(id, username.trim(), hash);
+    
+    logAction("USER_CREATED", admin.id, admin.username, req.ip || "unknown", `Created user ${username}`);
+    res.json({ success: true });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  } catch (err) {
+    const error = err as Error;
+    if (error.message.includes('UNIQUE')) {
+      return res.status(400).json({ error: "Username already exists" });
+    }
+    res.status(500).json({ error: "Internal server error" });
+  }
+});
+
+app.delete("/api/admin/users/:id", authenticateAdmin, (req, res) => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const admin = (req as any).user as UserRow;
+  const targetId = req.params.id;
+
+  const target = db.prepare("SELECT * FROM users WHERE id = ?").get(targetId) as UserRow | undefined;
+  if (!target) return res.status(404).json({ error: "User not found" });
+
+  if (target.is_root) {
+    return res.status(403).json({ error: "Root administrator cannot be deleted" });
+  }
+
+  db.prepare("DELETE FROM users WHERE id = ?").run(targetId);
+  logAction("USER_DELETED", admin.id, admin.username, req.ip || "unknown", `Deleted user ${target.username}`);
+  res.json({ success: true });
+});
+
+app.post("/api/admin/totp/setup", authenticateAdmin, async (req, res) => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const user = (req as any).user as UserRow;
+  const secret = authenticator.generateSecret();
+  const otpauth = authenticator.keyuri(user.username.trim(), 'SecureShare', secret);
+  
+  try {
+    const qrCodeUrl = await QRCode.toDataURL(otpauth);
+    // Store secret temporarily in session or just return it for verification
+    // For simplicity, we'll store it in the DB but marked as disabled
+    db.prepare("UPDATE users SET totp_secret = ?, is_totp_enabled = 0 WHERE id = ?").run(secret, user.id);
+    res.json({ qrCodeUrl, secret });
+  } catch {
+    res.status(500).json({ error: "Failed to generate QR code" });
+  }
+});
+
+app.post("/api/admin/totp/verify", authenticateAdmin, (req, res) => {
+  const { token } = req.body;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const user = (req as any).user as UserRow;
+
+  const dbUser = db.prepare("SELECT totp_secret FROM users WHERE id = ?").get(user.id) as UserRow | undefined;
+  if (!dbUser || !dbUser.totp_secret) return res.status(400).json({ error: "TOTP not set up" });
+
+  const isValid = authenticator.check(token, dbUser.totp_secret);
+  if (isValid) {
+    db.prepare("UPDATE users SET is_totp_enabled = 1 WHERE id = ?").run(user.id);
+    logAction("TOTP_ENABLED", user.id, user.username, req.ip || "unknown");
+    res.json({ success: true });
+  } else {
+    res.status(400).json({ error: "Invalid token" });
+  }
+});
+
+app.post("/api/admin/totp/disable", authenticateAdmin, (req, res) => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const user = (req as any).user as UserRow;
+  db.prepare("UPDATE users SET is_totp_enabled = 0, totp_secret = NULL WHERE id = ?").run(user.id);
+  logAction("TOTP_DISABLED", user.id, user.username, req.ip || "unknown");
+  res.json({ success: true });
+});
+
+app.get("/api/admin/logs", authenticateAdmin, (req, res) => {
+  const logs = db.prepare("SELECT * FROM audit_logs ORDER BY timestamp DESC LIMIT 100").all();
+  res.json(logs);
+});
+
+app.get("/api/admin/stats", authenticateAdmin, (req, res) => {
+  const totalSecrets = db.prepare("SELECT COUNT(*) as count FROM secrets").get() as { count: number };
+  const activeKeys = db.prepare("SELECT COUNT(*) as count FROM api_keys").get() as { count: number };
+  const totalViews = db.prepare("SELECT SUM(view_count) as count FROM secrets").get() as { count: number };
+  
+  res.json({
+    totalSecrets: totalSecrets.count,
+    activeKeys: activeKeys.count,
+    totalViews: totalViews.count || 0,
+    uptime: process.uptime()
+  });
+});
+
+app.get("/api/admin/keys", authenticateAdmin, (req, res) => {
+  const keys = db.prepare("SELECT id, name, created_at, last_used_at, usage_count FROM api_keys ORDER BY created_at DESC").all();
+  res.json(keys);
+});
+
+app.post("/api/admin/keys", authenticateAdmin, (req, res) => {
+  const { name } = req.body;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const admin = (req as any).user as UserRow;
+  if (!name) return res.status(400).json({ error: "Name is required" });
+
+  const id = crypto.randomBytes(4).toString('hex');
+  const rawKey = crypto.randomBytes(32).toString('hex');
+  const hash = crypto.createHash('sha256').update(rawKey).digest('hex');
+
+  db.prepare("INSERT INTO api_keys (id, name, key_hash) VALUES (?, ?, ?)").run(id, name, hash);
+  logAction("API_KEY_CREATED", admin.id, admin.username, req.ip || "unknown", `Created key ${name}`);
+
+  res.json({
+    id,
+    name,
+    apiKey: `${id}.${rawKey}` // Only shown once
+  });
+});
+
+app.delete("/api/admin/keys/:id", authenticateAdmin, (req, res) => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const admin = (req as any).user as UserRow;
+  db.prepare("DELETE FROM api_keys WHERE id = ?").run(req.params.id);
+  logAction("API_KEY_DELETED", admin.id, admin.username, req.ip || "unknown", `Deleted key ${req.params.id}`);
+  res.json({ success: true });
+});
+
+app.post("/api/secrets", createLimiter, verifyApiKey, (req, res) => {
   const result = CreateSecretSchema.safeParse(req.body);
   if (!result.success) {
     return res.status(400).json({ error: "Invalid input data", details: result.error.format() });
@@ -445,9 +816,8 @@ const startServer = async () => {
 
   // Security.txt implementation (RFC 9116)
   app.get(["/.well-known/security.txt", "/security.txt"], (req, res) => {
-    const securityTxt = `Contact: mailto:security@${req.hostname}
+    const securityTxt = `Contact: https://${req.hostname}/security-policy
 Expires: ${new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString()}
-Preferred-Languages: en, pl
 Canonical: https://${req.hostname}/.well-known/security.txt
 Policy: https://${req.hostname}/security-policy
 `;

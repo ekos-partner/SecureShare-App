@@ -16,6 +16,7 @@ It's a simple tool that lets you create a **secure, one-time link** for your sen
 -   **🔥 Self-Destructing Links**: Links are automatically deleted from the server after they are used.
 -   **🔑 Password Protection**: You can add an extra layer of security with a password.
 -   **📱 Easy Mobile Sharing**: Generate a QR code to securely transfer the link to your mobile device.
+-   **🛡️ Admin Dashboard**: Multi-user management with 2FA (TOTP) and detailed audit logs.
 
 ---
 
@@ -41,29 +42,59 @@ To prevent automated guessing of access passwords:
 - **Limit**: A secret is **permanently deleted** from the database after 3 failed password attempts.
 - **Rate Limiting**: Strict IP-based and global rate limits are enforced on all API endpoints.
 
-### 🔄 How it Works (Technically)
+### 🏛️ Architecture
 
-The security of SecureShare relies on the fact that the server is never aware of the decryption key.
+The application is designed with a security-first, zero-knowledge architecture.
 
 ```mermaid
-sequenceDiagram
-    participant B as User (Browser)
-    participant C as User (CLI)
-    participant S as Server (Node.js)
-    participant D as Database (SQLite)
-    
-    Note over B,C: Local Encryption (AES-GCM)
-    B->>S: Send Ciphertext
-    C->>S: Send Ciphertext
-    S->>D: Store Ciphertext & ID
-    S->>B: Return Secret ID
-    S->>C: Return Secret ID
-    
-    Note over B,C: Key is kept locally (# fragment or CLI memory)
+graph TD
+    subgraph "User's Browser (Client-Side)"
+        A[1. User Enters Secret] --> B{Web Crypto API};
+        B -- "Generates" --> C(Decryption Key);
+        B -- "Encrypts Secret" --> D(Encrypted Data Blob);
+    end
+
+    subgraph "SecureShare Server (Node.js + Express)"
+        E[API Endpoint] --> F[(SQLite Database)];
+        G[Admin Dashboard] --> F;
+        H[REST API] --> F;
+    end
+
+    D -->|2. Send Blob to Server| E;
+    E -->|3. Store Blob & Return ID| F;
+    F -->|4. Returns Secret ID| E;
+    E -->|5. Send ID to Browser| A;
+
+    subgraph "Link Generation"
+        C -- "Combined in Browser" --> I(Generated Secure Link);
+        A -- "Combined in Browser" --> I;
+        I -- "Example: /s/uuid#key" --> J{Share with Recipient};
+    end
+
+    J --> K[Recipient Opens Link];
+
+    subgraph "Recipient's Browser (Client-Side)"
+        K -- "6. Fetches Blob by ID" --> E;
+        E --> F;
+        F --> E;
+        E --> L(Encrypted Data Blob);
+        K -- "7. Key is in URL Fragment (#)" --> M{Web Crypto API};
+        L --> M;
+        M -->|8. Decrypts Locally| N[Secret Revealed];
+    end
+
+    style F fill:#f9f,stroke:#333,stroke-width:2px
 ```
 
-## 🛡️ Threat Model
-For a detailed analysis of security assumptions and mitigations, see [THREAT_MODEL.md](./THREAT_MODEL.md).
+## 🔐 Admin Panel & Management
+
+SecureShare includes a comprehensive administrative dashboard for managing the instance. It provides:
+-   User management (multiple admins, password resets).
+-   Two-Factor Authentication (2FA) for admin accounts.
+-   API key generation and revocation.
+-   Detailed audit logs of all system and user actions.
+
+For detailed instructions on setup, password management, and recovery, please see the **[Admin Guide](./ADMIN_GUIDE.md)**.
 
 ## 🚀 Deployment
 For detailed instructions on deploying to GCP, Azure, VPS, or using Docker with HTTPS, see the [Deployment Guide](./DEPLOYMENT.md).
@@ -112,16 +143,33 @@ npm test
 npm run lint
 ```
 
+## 💡 Choosing Your Interface: GUI, CLI, or API?
+
+SecureShare offers three ways to interact with the system, each designed for different needs.
+
+| Interface | Best For... | Use Case Example |
+| :--- | :--- | :--- |
+| **🌐 GUI (Web App)** | **Manual, one-off sharing.** Ideal for all users, including non-technical ones. | Quickly sending a password to a colleague. |
+| **💻 CLI (Command Line)** | **Developers & Admins.** Perfect for scripting and terminal-based workflows. | A bash script that generates a temporary key and shares it. |
+| **🤖 API (REST)** | **Automated systems.** For deep integration with other applications. | A CI/CD pipeline that provides a database password to a deployment script. |
+
+---
+
 ## 🛡️ Security Features
 -   **AES-256-GCM Encryption**: Authenticated encryption using Web Crypto API.
 -   **Atomic Transactions**: Prevents race conditions during secret destruction.
 -   **Zero-Knowledge**: Server never sees the decryption key.
 -   **Rate Limiting**: Protects against brute-force and DoS.
+-   **Multi-User Admin**: Secure dashboard with role-based access.
+-   **Two-Factor Authentication (2FA)**: TOTP support for all administrative accounts.
+-   **Audit Logging**: Comprehensive tracking of all administrative actions.
 
-## 💻 CLI Tool
-A command-line interface (CLI) is available for encrypting and sharing secrets directly from your terminal. It supports cross-compilation for Windows, macOS, and Linux.
+## 💻 API & Integrations
+A powerful REST API is available for integrating SecureShare into your workflows. A command-line interface (CLI) is also provided for easy terminal-based sharing.
 
-See [cli/README.md](./cli/README.md) for installation and usage instructions.
+- **[Admin Dashboard Guide](./ADMIN_GUIDE.md)**: How to manage users, 2FA, and API keys.
+- **[API Reference](./API_REFERENCE.md)**: Detailed endpoint and usage examples.
+- **[CLI Guide](./cli/README.md)**: Installation and usage instructions for the CLI.
 
 ## 🛠️ Technology Stack
 - **Frontend**: React 19, Tailwind CSS 4, Motion.
@@ -130,7 +178,8 @@ See [cli/README.md](./cli/README.md) for installation and usage instructions.
 - **Encryption**: Web Crypto API (AES-256-GCM, PBKDF2, SHA-256).
 
 ## 📋 Compliance & Standards
-- **RFC 9116**: `security.txt` is implemented at `/.well-known/security.txt`.
+- **RFC 9116**: `security.txt` is implemented at `/.well-known/security.txt` and `/security.txt`.
+- **Security Policy**: Publicly accessible at `/security-policy`.
 - **Opaque Errors**: Prevents enumeration attacks.
 
 ## ⚙️ Technical Limits

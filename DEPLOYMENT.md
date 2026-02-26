@@ -2,6 +2,23 @@
 
 This guide covers various scenarios for deploying SecureShare in production environments.
 
+## 🌐 Network Requirements & Configuration
+
+SecureShare is designed to run behind a reverse proxy, which handles SSL termination and routes traffic to the application. The application itself listens on a single port.
+
+| Service | Port | Protocol | Description |
+| :--- | :--- | :--- | :--- |
+| **Application** | `3000` | HTTP | The internal port SecureShare listens on. **Should NOT be exposed directly to the public internet.** |
+| **Reverse Proxy** | `80` | HTTP | Standard port for HTTP traffic. Should redirect to HTTPS. |
+| **Reverse Proxy** | `443` | HTTPS | Standard port for secure HTTPS traffic. **REQUIRED for production.** |
+
+**Key Considerations:**
+-   **HTTPS is Mandatory**: The Web Crypto API, essential for SecureShare's encryption, requires a secure context (HTTPS or `localhost`). Never deploy to production without HTTPS.
+-   **Reverse Proxy**: Always use a reverse proxy (e.g., Nginx, Apache, Cloud Load Balancer) to manage public traffic, handle SSL/TLS termination, and forward requests to the application's internal port (3000).
+-   **Firewall Rules**: Configure your firewall to only allow inbound traffic on ports 80 and 443 (for the reverse proxy). All other ports, especially 3000, should be blocked from public access.
+
+---
+
 ## 📋 Prerequisites
 - Node.js 20+ (for manual installation)
 - Docker & Docker Compose (for containerized deployment)
@@ -32,7 +49,10 @@ PORT=3000
 NODE_ENV=production
 APP_URL=https://your-domain.com
 DB_PATH=./data/secrets.db
+ADMIN_PASSWORD=your_strong_initial_password
 ```
+**IMPORTANT**: Set `ADMIN_PASSWORD` to a strong, unique password. This will be the initial password for the `admin` user. You will be required to change it upon first login.
+
 Ensure the data directory exists: `mkdir -p data`
 
 ### Step 4: Run with PM2 (Recommended)
@@ -129,9 +149,17 @@ docker push [YOUR_REGISTRY_NAME].azurecr.io/secureshare:v1
 ## 🔐 Security Checklist
 1.  **HTTPS**: Never run this app over plain HTTP in production. HSTS is enabled by default.
 2.  **Database Permissions**: If running manually, ensure the `secrets.db` file is only readable by the user running the app (`chmod 600 data/secrets.db`).
-3.  **Firewall**: Only expose ports 80 and 443. Keep port 3000 closed to the public (Nginx will handle it internally).
-4.  **Monitoring**: Use tools like `uptime-kuma` or Cloud Monitoring to ensure the app is healthy.
-5.  **Review Limitations**: Please read [LIMITATIONS.md](./LIMITATIONS.md) to understand the security model and what this app is NOT designed for.
+3.  **Firewall**: Configure your host/cloud firewall to only expose ports 80 and 443 (for the reverse proxy). All other ports, especially 3000, should be blocked from public access.
+4.  **Web Application Firewall (WAF)**: Consider implementing a WAF (e.g., Cloudflare, AWS WAF) to protect against common web vulnerabilities (SQL injection, XSS) and manage bot traffic.
+5.  **DDoS Protection**: Utilize cloud provider services or specialized solutions for Distributed Denial of Service (DDoS) protection.
+6.  **TLS Configuration**: Ensure your reverse proxy is configured with strong, modern TLS cipher suites and protocols. Implement HTTP Strict Transport Security (HSTS).
+7.  **Monitoring & Observability**: Implement comprehensive monitoring:
+    *   **Application Logs**: Collect and analyze application logs for errors, unusual activity, and security events. Integrate with a SIEM (Security Information and Event Management) system like Splunk, ELK Stack, or cloud-native solutions.
+    *   **Network Traffic Analysis**: Monitor network traffic for anomalies, unauthorized access attempts, and data exfiltration.
+    *   **System Metrics**: Track CPU, memory, disk I/O, and network usage of your server instances.
+    *   **Security Audits**: Regularly perform vulnerability scans, penetration testing, and code audits.
+    *   **Rate Limiting**: Monitor and alert on excessive requests to API endpoints, which could indicate brute-force attacks or abuse.
+8.  **Review Limitations**: Please read [LIMITATIONS.md](./LIMITATIONS.md) to understand the security model and what this app is NOT designed for.
 
 ## 🛠️ Troubleshooting
 -   **"Crypto not available"**: Ensure you are accessing the app via `https://` or `localhost`. The Web Crypto API requires a secure context.

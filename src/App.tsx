@@ -26,12 +26,16 @@ import { encryptSecret, decryptSecret, hashPassword } from './lib/crypto';
 import clsx, { type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { QRCodeSVG } from 'qrcode.react';
+import AdminDashboard from './pages/AdminDashboard';
+import ApiDocs from './pages/ApiDocs';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-type ViewState = 'create' | 'success' | 'view' | 'error';
+type ViewState = 'create' | 'success' | 'view' | 'error' | 'admin' | 'docs';
 
 const getPasswordStrength = (pwd: string) => {
   if (!pwd) return 0;
@@ -126,7 +130,32 @@ export default function App() {
   const [remainingViews, setRemainingViews] = useState<number | null>(null);
   const [showInfo, setShowInfo] = useState(false);
   const [isDownloadingQR, setIsDownloadingQR] = useState(false);
+  const [readmeContent, setReadmeContent] = useState('');
   const qrCodeRef = React.useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const fetchReadme = async () => {
+      try {
+        const res = await fetch('/README.md');
+        const text = await res.text();
+        // Replace placeholders with dynamic app URL
+        const appUrl = getAppOrigin();
+        const processedText = text
+          .replace(/\.\/ADMIN_GUIDE\.md/g, `[Admin Guide](${appUrl}/admin)`)
+          .replace(/\.\/API_REFERENCE\.md/g, `[API Reference](${appUrl}/docs)`)
+          .replace(/\.\/cli\/README\.md/g, `[CLI Guide](https://github.com/GoogleCloudPlatform/SecureShare/blob/main/cli/README.md)`)
+          .replace(/\.\/DEPLOYMENT\.md/g, `[Deployment Guide](https://github.com/GoogleCloudPlatform/SecureShare/blob/main/DEPLOYMENT.md)`)
+          .replace(/\.\/SECURITY_LIMITATIONS\.md/g, `[Security Limitations](https://github.com/GoogleCloudPlatform/SecureShare/blob/main/SECURITY_LIMITATIONS.md)`)
+          .replace(/\.\/THREAT_MODEL\.md/g, `[Threat Model](https://github.com/GoogleCloudPlatform/SecureShare/blob/main/THREAT_MODEL.md)`);
+
+        setReadmeContent(processedText);
+      } catch (err) {
+        console.error('Failed to fetch README.md:', err);
+        setReadmeContent('Failed to load additional information.');
+      }
+    };
+    fetchReadme();
+  }, []);
 
   /**
    * THEME INITIALIZATION
@@ -169,6 +198,10 @@ export default function App() {
             setError('Invalid link format.');
             setView('error');
           }
+        } else if (path === '/admin' || path === '/admin/') {
+          setView('admin');
+        } else if (path === '/docs' || path === '/docs/') {
+          setView('docs');
         } else if (path === '/' || path === '') {
           setView('create');
         }
@@ -387,6 +420,9 @@ export default function App() {
       setTimeout(() => setIsDownloadingQR(false), 1000);
     }
   };
+
+  if (view === 'admin') return <AdminDashboard />;
+  if (view === 'docs') return <ApiDocs />;
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-slate-950 transition-colors duration-300">
@@ -793,6 +829,9 @@ export default function App() {
       </main>
 
       <footer className="mt-auto py-8 text-slate-400 dark:text-slate-500 text-sm flex flex-col items-center gap-4">
+        <div className="flex flex-wrap justify-center gap-x-6 gap-y-2 mb-4">
+          <a href="/docs" className="hover:text-indigo-400 transition-colors font-bold text-[10px] uppercase tracking-widest">API Docs</a>
+        </div>
         <button 
           onClick={() => setShowInfo(true)}
           className="flex items-center gap-2 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors font-medium"
