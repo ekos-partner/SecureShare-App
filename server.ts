@@ -28,6 +28,7 @@ import jwt from 'jsonwebtoken';
 import cookieParser from 'cookie-parser';
 import { authenticator } from 'otplib';
 import QRCode from 'qrcode';
+import bcrypt from 'bcrypt';
 
 /**
  * DATABASE INITIALIZATION
@@ -207,7 +208,25 @@ function handleViewLimit(db: Database.Database, secret: any) {
 const app = express();
 const PORT = Number.parseInt(process.env.PORT || "3000", 10);
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
-const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(32).toString('hex');
+
+// JWT Secret security check
+const getJwtSecret = () => {
+  const secret = process.env.JWT_SECRET;
+  if (process.env.NODE_ENV === "production") {
+    if (!secret || secret.length < 32) {
+      console.error("CRITICAL: JWT_SECRET must be set in environment and be at least 32 characters long in production!");
+      process.exit(1);
+    }
+    return secret;
+  }
+  if (!secret) {
+    console.warn("WARNING: JWT_SECRET not set. Using temporary random secret. Admin sessions will reset on restart.");
+    return crypto.randomBytes(32).toString('hex');
+  }
+  return secret;
+};
+
+const JWT_SECRET = getJwtSecret();
 
 /**
  * AUDIT LOGGING HELPER
@@ -225,19 +244,19 @@ function logAction(action: string, userId: string | null, username: string | nul
  * INITIALIZE ROOT USER
  * If no users exist, create the root user from ADMIN_PASSWORD
  */
-function initializeRootUser() {
+async function initializeRootUser() {
   const userCount = db.prepare("SELECT COUNT(*) as count FROM users").get() as { count: number };
   if (userCount.count === 0) {
     const id = uuidv4();
     const initialPassword = ADMIN_PASSWORD || 'admin'; // Fallback to 'admin' if ENV var not set
-    const hash = crypto.createHash('sha256').update(initialPassword).digest('hex');
+    const hash = await bcrypt.hash(initialPassword, 12);
     db.prepare("INSERT INTO users (id, username, password_hash, is_root, must_change_password) VALUES (?, ?, ?, ?, ?)")
       .run(id, 'admin', hash, 1, 1); // Force password change on first login
-    console.log(`[Security] Root admin user initialized. Password set from ENV or default. Must change password on first login.`);
+    console.log(`[Security] Root admin user initialized with bcrypt. Must change password on first login.`);
     logAction("SYSTEM_INIT", id, "admin", "127.0.0.1", "Root user created from ENV or default");
   }
 }
-initializeRootUser();
+initializeRootUser().catch(console.error);
 
 app.use(cookieParser());
 
@@ -414,7 +433,7 @@ app.get("/api/health", (req, res) => {
 /**
  * ADMIN API ROUTES
  */
-app.post("/api/admin/login", authLimiter, (req, res) => {
+app.post("/api/admin/login", authLimiter, async (req, res) => {
   const { username, password, totpToken } = req.body;
   const ip = req.ip || "unknown";
 
@@ -434,8 +453,25 @@ app.post("/api/admin/login", authLimiter, (req, res) => {
     return res.status(403).json({ error: "Account locked. Please try again later." });
   }
 
-  const hash = crypto.createHash('sha256').update(password).digest('hex');
-  if (hash !== user.password_hash) {
+  // Password verification with migration support (SHA-256 -> bcrypt)
+  let isPasswordValid = false;
+  const isLegacyHash = user.password_hash.length === 64 && !user.password_hash.startsWith('$2');
+
+  if (isLegacyHash) {
+    const legacyHash = crypto.createHash('sha256').update(password).digest('hex');
+    isPasswordValid = legacyHash === user.password_hash;
+    
+    if (isPasswordValid) {
+      // Migrate to bcrypt
+      const newHash = await bcrypt.hash(password, 12);
+      db.prepare("UPDATE users SET password_hash = ? WHERE id = ?").run(newHash, user.id);
+      console.log(`[Security] Migrated user ${username} from SHA-256 to bcrypt.`);
+    }
+  } else {
+    isPasswordValid = await bcrypt.compare(password, user.password_hash);
+  }
+
+  if (!isPasswordValid) {
     const attempts = user.failed_attempts + 1;
     let lockoutUntil = null;
     if (attempts >= 5) {
@@ -477,7 +513,7 @@ app.post("/api/admin/login", authLimiter, (req, res) => {
   });
 });
 
-app.post("/api/admin/change-password", authenticateAdmin, (req, res) => {
+app.post("/api/admin/change-password", authenticateAdmin, async (req, res) => {
   const { newPassword } = req.body;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const user = (req as any).user as UserRow;
@@ -486,7 +522,7 @@ app.post("/api/admin/change-password", authenticateAdmin, (req, res) => {
     return res.status(400).json({ error: "Password must be at least 8 characters long" });
   }
 
-  const hash = crypto.createHash('sha256').update(newPassword).digest('hex');
+  const hash = await bcrypt.hash(newPassword, 12);
   db.prepare("UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?").run(hash, user.id);
   
   logAction("PASSWORD_CHANGED", user.id, user.username, req.ip || "unknown");
@@ -498,7 +534,7 @@ app.get("/api/admin/users", authenticateAdmin, (req, res) => {
   res.json(users);
 });
 
-app.post("/api/admin/users", authenticateAdmin, (req, res) => {
+app.post("/api/admin/users", authenticateAdmin, async (req, res) => {
   const { username, password } = req.body;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const admin = (req as any).user as UserRow;
@@ -509,7 +545,7 @@ app.post("/api/admin/users", authenticateAdmin, (req, res) => {
 
   try {
     const id = uuidv4();
-    const hash = crypto.createHash('sha256').update(password).digest('hex');
+    const hash = await bcrypt.hash(password, 12);
     db.prepare("INSERT INTO users (id, username, password_hash, must_change_password) VALUES (?, ?, ?, 1)")
       .run(id, username.trim(), hash);
     
