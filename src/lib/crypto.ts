@@ -1,13 +1,25 @@
 /**
  * Modern Cryptography Module using Web Crypto API (AES-GCM)
  * 
- * SECURITY ARCHITECTURE:
- * - Algorithm: AES-GCM (Galois/Counter Mode) - provides Authenticated Encryption (confidentiality + integrity).
- * - Key Length: 256 bits.
- * - IV (Nonce): 12 bytes (96 bits), unique per encryption.
- * - KDF: PBKDF2-SHA-256 with 100,000 iterations for password-derived keys.
+ * SECURITY ARCHITECTURE & ZERO-KNOWLEDGE IMPLEMENTATION:
  * 
- * This replaces the legacy crypto-js implementation.
+ * This module is the core of SecureShare's Zero-Knowledge architecture. It ensures that 
+ * all sensitive data is encrypted *before* it ever leaves the user's device. The server
+ * only receives opaque, authenticated ciphertexts.
+ * 
+ * Cryptographic Primitives Used:
+ * - Algorithm: AES-256-GCM (Galois/Counter Mode). Chosen for Authenticated Encryption with 
+ *   Associated Data (AEAD), providing both strict confidentiality and cryptographic integrity.
+ * - Key Length: 256 bits (Military-grade encryption standard).
+ * - IV (Initialization Vector): 12 bytes (96 bits) cryptographically secure random nonce, 
+ *   unique per encryption operation to prevent stream cipher reuse attacks.
+ * - Key Derivation Function (KDF): PBKDF2-SHA-256 with 100,000 iterations. Used to derive 
+ *   strong encryption keys from user-provided passwords, heavily mitigating brute-force and 
+ *   dictionary attacks.
+ * 
+ * This implementation strictly utilizes the native browser `window.crypto.subtle` API, 
+ * ensuring execution in a secure, optimized, and audited environment, replacing legacy 
+ * JavaScript-based crypto libraries.
  */
 
 // Helper to convert ArrayBuffer to Base64 string

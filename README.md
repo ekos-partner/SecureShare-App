@@ -27,22 +27,30 @@ SecureShare is a high-security, zero-knowledge platform for sharing sensitive in
 
 ### 🔐 Core Security Principles
 
-#### 1. End-to-End Encryption (E2EE)
+#### 1. End-to-End Encryption (E2EE) & Zero-Knowledge
 All encryption and decryption happen exclusively in the user's browser.
-- **Algorithm**: AES-256-GCM (Authenticated Encryption).
+- **Algorithm**: AES-256-GCM (Authenticated Encryption with Associated Data).
 - **Key Storage**: The unique decryption key is generated on the client and stored in the URL fragment (the part after the `#`). 
 - **Zero-Knowledge**: Per W3C standards, the URL fragment is **never sent to the server**. Our infrastructure only sees the encrypted blob, never the key.
 
-#### 2. Strong Key Derivation (KDF)
+#### 2. Advanced Anti-DoS & Anti-Spam (Proof of Work)
+To ensure high availability and prevent automated abuse, SecureShare implements a robust, cryptographic Proof of Work (PoW) system.
+- **Hashcash Implementation**: Every secret creation request requires the client to solve a computationally expensive SHA-256 challenge.
+- **Dynamic Difficulty**: The challenge difficulty is dynamically adjusted by the server.
+- **Replay Protection**: A server-side SQLite nonce tracking system guarantees that a PoW solution can only be used exactly once.
+- **Strict Expiry**: Challenges are cryptographically salted with a timestamp and expire strictly after 10 minutes, preventing pre-computation attacks.
+- **API Exemption**: Programmatic access via valid API keys bypasses PoW, ensuring seamless automation for trusted systems.
+
+#### 3. Strong Key Derivation (KDF)
 When an optional access password is set, we don't use it directly as a key.
 - **Mechanism**: PBKDF2 with 100,000 iterations and SHA-256.
 - **Salt**: Every secret has a unique, cryptographically secure random salt generated on the client.
 
-#### 3. Brute-Force & Anti-Spam Protection
-To prevent automated guessing and service abuse:
-- **Proof of Work (PoW)**: All secret creation requests must solve a Hashcash-style challenge. This forces clients to spend CPU time, making large-scale spam or DoS attacks economically unfeasible while remaining invisible to legitimate users.
+#### 4. Brute-Force Protection & Auto-Destruction
+To prevent automated guessing and unauthorized access:
 - **Auto-Destruction**: A secret is **permanently deleted** from the database after 3 failed password attempts.
 - **Rate Limiting**: Strict IP-based and global rate limits are enforced on all API endpoints.
+- **Atomic Transactions**: Database reads and deletions are wrapped in strict `IMMEDIATE` SQLite transactions, completely eliminating race conditions (e.g., two people clicking a one-time link simultaneously).
 
 ### 🏛️ Architecture
 
@@ -157,14 +165,15 @@ SecureShare offers three ways to interact with the system, each designed for dif
 
 ---
 
-## 🛡️ Security Features
--   **AES-256-GCM Encryption**: Authenticated encryption using Web Crypto API.
--   **Atomic Transactions**: Prevents race conditions during secret destruction.
--   **Zero-Knowledge**: Server never sees the decryption key.
--   **Rate Limiting**: Protects against brute-force and DoS.
--   **Multi-User Admin**: Secure dashboard with role-based access.
+## 🛡️ Security Features Overview
+-   **AES-256-GCM Encryption**: Authenticated encryption using the native Web Crypto API.
+-   **Cryptographic Proof of Work (PoW)**: Hashcash-style Anti-DoS protection with replay prevention and strict TTL.
+-   **Atomic Transactions**: Prevents race conditions during secret destruction using SQLite `IMMEDIATE` locks.
+-   **Zero-Knowledge Architecture**: The server never sees the decryption key or plaintext data.
+-   **Hardened Session Management**: Strict CSRF protection, secure cookie attributes (`httpOnly`, `Secure`, `SameSite=Strict`), and explicit server-side logout.
+-   **Multi-User Admin**: Secure dashboard with role-based access and `bcrypt` password hashing.
 -   **Two-Factor Authentication (2FA)**: TOTP support for all administrative accounts.
--   **Audit Logging**: Comprehensive tracking of all administrative actions.
+-   **Audit Logging**: Comprehensive, privacy-respecting tracking of all administrative actions.
 
 ## 💻 API & Integrations
 A powerful REST API is available for integrating SecureShare into your workflows. A command-line interface (CLI) is also provided for easy terminal-based sharing.

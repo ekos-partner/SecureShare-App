@@ -449,24 +449,41 @@ setInterval(() => {
 const POW_DIFFICULTY = 18; // ~250ms-500ms on modern CPUs. Adjust as needed.
 
 /**
- * PROOF OF WORK (HASHCASH) HELPERS
+ * PROOF OF WORK (HASHCASH) VALIDATION
+ * 
+ * This function implements a cryptographic Proof of Work (PoW) verification system
+ * designed to protect the application from automated Denial of Service (DoS) and spam attacks.
+ * 
+ * Security Features:
+ * 1. Time-To-Live (TTL): The salt contains a timestamp. Challenges strictly expire after 10 minutes.
+ * 2. Replay Protection: A server-side SQLite table (`pow_nonces`) tracks used solutions.
+ *    Attempting to reuse a valid `salt:nonce` pair will result in a database constraint error,
+ *    instantly rejecting the replay attack.
+ * 3. Dynamic Difficulty: The server dictates the number of leading zero bits required in the SHA-256 hash.
+ * 
+ * @param resource - The specific resource being protected (e.g., 'create_secret').
+ * @param salt - The server-provided salt containing the timestamp (format: timestamp_random).
+ * @param nonce - The client-computed nonce that solves the challenge.
+ * @param difficulty - The required number of leading zero bits in the resulting hash.
+ * @returns boolean - True if the PoW is valid, fresh, and unused. False otherwise.
  */
 function verifyPoW(resource: string, salt: string, nonce: string, difficulty: number): boolean {
-  // 1. Check if salt is expired (salt format: timestamp_random)
+  // 1. Validate Time-To-Live (TTL) to prevent pre-computation attacks
   const parts = salt.split('_');
   if (parts.length !== 2) return false;
   const timestamp = parseInt(parts[0], 10);
   const now = Date.now();
-  if (isNaN(timestamp) || now - timestamp > 600000) return false; // 10 minutes expiry
+  if (isNaN(timestamp) || now - timestamp > 600000) return false; // Strict 10-minute expiry
 
-  // 2. Check for replay attack
+  // 2. Enforce Replay Protection via SQLite Unique Constraint
   const powId = `${salt}:${nonce}`;
   try {
     db.prepare("INSERT INTO pow_nonces (id) VALUES (?)").run(powId);
   } catch {
-    return false; // Already used
+    return false; // Constraint violation: This exact PoW solution has already been used.
   }
 
+  // 3. Cryptographic Hash Verification
   const header = `1:${difficulty}:${resource}:${salt}:${nonce}`;
   const hash = crypto.createHash('sha256').update(header).digest('hex');
   

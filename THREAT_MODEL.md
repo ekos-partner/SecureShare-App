@@ -24,10 +24,12 @@ This document outlines the security assumptions, trust boundaries, and threat mi
     - **Zero-Knowledge Storage**: The server never receives the decryption key (stored in URL fragment `#`). Ciphertexts are useless without the key.
     - **JS Integrity Risk**: We acknowledge that a compromised server could serve malicious JavaScript to intercept keys. We mitigate this via strict CSP, HSTS, and by keeping the client-side code minimal and auditable. This is a fundamental limitation of web-based E2EE.
 
-### C. Brute-Force Attacker
-- **Threat**: Guessing the access password for a known secret ID.
+### C. Brute-Force Attacker & Automated Spam (DoS)
+- **Threat**: Guessing the access password for a known secret ID, or flooding the server with millions of secret creation requests to exhaust resources.
 - **Mitigation**: 
-    - Server-side rate limiting (IP-based).
+    - **Cryptographic Proof of Work (PoW)**: All secret creation requests (except those authenticated via API keys) must solve a dynamic Hashcash challenge. This makes automated spam economically unfeasible.
+    - **PoW Replay Protection**: Server-side nonce tracking prevents the reuse of pre-computed PoW solutions.
+    - **Strict Rate Limiting**: IP-based limits enforced on all API endpoints.
     - **Burn-on-Fail Policy**: The secret is permanently deleted after 3 failed password attempts.
     - PBKDF2 with 100,000 iterations for key derivation.
 
@@ -37,11 +39,11 @@ This document outlines the security assumptions, trust boundaries, and threat mi
     - UUID v4 for secret IDs (virtually impossible to guess).
     - Opaque error messages (404 for both non-existent and expired secrets).
 
-### E. Cross-Site Scripting (XSS)
-- **Threat**: Injecting malicious scripts to steal the decryption key from the URL fragment.
+### E. Cross-Site Scripting (XSS) & Cross-Site Request Forgery (CSRF)
+- **Threat**: Injecting malicious scripts to steal the decryption key from the URL fragment, or forcing an authenticated admin to perform unwanted actions.
 - **Mitigation**: 
-    - Strict Content Security Policy (CSP) with Nonce-based script execution.
-    - No `unsafe-inline` or `unsafe-eval` allowed.
+    - **XSS**: Strict Content Security Policy (CSP) with Nonce-based script execution. No `unsafe-inline` or `unsafe-eval` allowed.
+    - **CSRF**: All administrative state-changing endpoints are protected by strict CSRF tokens (`csurf` middleware) and `SameSite=Strict` cookies.
 
 ### F. Race Condition (Double Read)
 - **Threat**: Two users accessing a "one-time" secret simultaneously, both receiving the content before the first one is deleted.

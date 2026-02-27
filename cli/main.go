@@ -100,21 +100,37 @@ func main() {
 		defaultAPIURL = envURL
 	}
 
-	// Simple subcommand detection
-	if len(os.Args) > 1 {
-		if os.Args[1] == "get" {
-			handleGet()
-			return
+	// Subcommand detection
+	args := os.Args[1:]
+	subcommand := ""
+	subcommandIdx := -1
+
+	for i, arg := range args {
+		if arg == "get" || arg == "create" {
+			subcommand = arg
+			subcommandIdx = i
+			break
 		}
-		if os.Args[1] == "help" || os.Args[1] == "-h" || os.Args[1] == "--help" {
+		if arg == "help" || arg == "-h" || arg == "--help" {
 			printGeneralUsage()
 			return
 		}
-		// If it's 'create', skip the word and pass the rest
-		if os.Args[1] == "create" {
-			handleCreate(os.Args[2:])
-			return
-		}
+	}
+
+	if subcommand == "get" {
+		// Pass everything except the 'get' word
+		newArgs := append([]string{}, args[:subcommandIdx]...)
+		newArgs = append(newArgs, args[subcommandIdx+1:]...)
+		handleGet(newArgs)
+		return
+	}
+
+	if subcommand == "create" {
+		// Pass everything except the 'create' word
+		newArgs := append([]string{}, args[:subcommandIdx]...)
+		newArgs = append(newArgs, args[subcommandIdx+1:]...)
+		handleCreate(newArgs)
+		return
 	}
 
 	// Check for piped input or arguments
@@ -126,7 +142,7 @@ func main() {
 		return
 	}
 
-	// Default: handle as create with all original arguments
+	// Default: handle as create
 	handleCreate(os.Args[1:])
 }
 
@@ -151,7 +167,7 @@ func printGeneralUsage() {
 	fmt.Printf("\nRun '%s%s create --help' or '%s%s get --help' for more details.\n", examplePrefix, binaryName, examplePrefix, binaryName)
 }
 
-func handleGet() {
+func handleGet(args []string) {
 	getFlags := flag.NewFlagSet("get", flag.ExitOnError)
 	password := getFlags.String("password", "", "Password for the secret (if protected)")
 	getFlags.Usage = func() {
@@ -161,7 +177,6 @@ func handleGet() {
 
 	// Custom parsing to allow flags anywhere (e.g., after the URL)
 	var rawURL string
-	args := os.Args[2:]
 	var flagsToParse []string
 	for i := 0; i < len(args); i++ {
 		if strings.HasPrefix(args[i], "-") {

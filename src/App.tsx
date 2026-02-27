@@ -894,6 +894,12 @@ export default function App() {
                 >
                   View Public GitHub Repository
                 </a>
+                <div className="mb-6 p-3 bg-indigo-50 dark:bg-indigo-900/20 rounded-xl border border-indigo-100 dark:border-indigo-800/50">
+                  <p className="text-[10px] uppercase tracking-widest font-bold text-indigo-600 dark:text-indigo-400 mb-1">CLI Power Tip</p>
+                  <p className="text-xs text-slate-600 dark:text-slate-400 leading-relaxed">
+                    Set <code className="bg-white dark:bg-slate-800 px-1 rounded">SECURESHARE_URL</code> to <code className="bg-white dark:bg-slate-800 px-1 rounded">https://secureshare.example.com</code> in your environment to use the CLI without the <code className="bg-white dark:bg-slate-800 px-1 rounded">-url</code> flag.
+                  </p>
+                </div>
                 <button 
                   onClick={() => setShowInfo(false)}
                   className="px-6 py-2 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 transition-colors"

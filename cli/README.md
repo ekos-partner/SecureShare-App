@@ -162,8 +162,9 @@ For a full list of options for each command, use the `--help` flag:
 
 ### Environment Variables
 
-You can set the default server URL using the `SECURESHARE_URL` environment variable to avoid passing the `-url` flag every time:
+You can set the default server URL using the `SECURESHARE_URL` environment variable to avoid passing the `-url` flag every time. This is highly recommended for production instances.
 
+**Example:**
 ```bash
 # Linux/macOS
 export SECURESHARE_URL=https://secureshare.example.com
@@ -173,6 +174,8 @@ export SECURESHARE_URL=https://secureshare.example.com
 $env:SECURESHARE_URL="https://secureshare.example.com"
 .\secureshare-cli.exe "My secret message"
 ```
+
+> **Tip**: Always use the full URL including `https://` for secure production environments.
 
 ### Options (for Creation)
 
