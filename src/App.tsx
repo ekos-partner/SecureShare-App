@@ -27,14 +27,12 @@ import clsx, { type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { QRCodeSVG } from 'qrcode.react';
 import AdminDashboard from './pages/AdminDashboard';
-import ApiDocs from './pages/ApiDocs';
-
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-type ViewState = 'create' | 'success' | 'view' | 'error' | 'admin' | 'docs';
+type ViewState = 'create' | 'success' | 'view' | 'error' | 'admin';
 
 const getPasswordStrength = (pwd: string) => {
   if (!pwd) return 0;
@@ -177,8 +175,6 @@ export default function App() {
           }
         } else if (path === '/admin' || path === '/admin/') {
           setView('admin');
-        } else if (path === '/docs' || path === '/docs/') {
-          setView('docs');
         } else if (path === '/' || path === '') {
           setView('create');
         }
@@ -228,9 +224,39 @@ export default function App() {
     }
   };
 
+  const solvePoW = async (resource: string, salt: string, difficulty: number) => {
+    const targetPrefix = '0'.repeat(difficulty);
+    let nonce = 0;
+    
+    while (true) {
+      const header = `1:${difficulty}:${resource}:${salt}:${nonce}`;
+      const msgUint8 = new TextEncoder().encode(header);
+      const hashBuffer = await crypto.subtle.digest('SHA-256', msgUint8);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      const binaryHash = hashArray.map(b => b.toString(2).padStart(8, '0')).join('');
+      
+      if (binaryHash.startsWith(targetPrefix)) {
+        return nonce.toString();
+      }
+      nonce++;
+      // Yield to UI every 5000 iterations to prevent freezing
+      if (nonce % 5000 === 0) {
+        await new Promise(resolve => setTimeout(resolve, 0));
+      }
+    }
+  };
+
   const performSecretGeneration = async () => {
     const { encryptedData, key, salt } = await encryptSecret(secret, password);
     const pHash = (password && salt) ? await hashPassword(password, salt) : null;
+    
+    // Fetch PoW Challenge
+    const challengeRes = await fetch('/api/pow/challenge');
+    if (!challengeRes.ok) throw new Error('Failed to get security challenge');
+    const challenge = await challengeRes.json();
+    
+    // Solve PoW
+    const powNonce = await solvePoW(challenge.resource, challenge.salt, challenge.difficulty);
     
     const res = await fetch('/api/secrets', {
       method: 'POST',
@@ -240,7 +266,9 @@ export default function App() {
         passwordHash: pHash,
         salt: salt,
         expirationHours: Number.parseInt(expiration, 10),
-        viewLimit: Number.parseInt(viewLimit, 10)
+        viewLimit: Number.parseInt(viewLimit, 10),
+        powNonce,
+        powSalt: challenge.salt
       })
     });
     
@@ -399,7 +427,6 @@ export default function App() {
   };
 
   if (view === 'admin') return <AdminDashboard />;
-  if (view === 'docs') return <ApiDocs />;
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-slate-950 transition-colors duration-300">
@@ -806,9 +833,6 @@ export default function App() {
       </main>
 
       <footer className="mt-auto py-8 text-slate-400 dark:text-slate-500 text-sm flex flex-col items-center gap-4">
-        <div className="flex flex-wrap justify-center gap-x-6 gap-y-2 mb-4">
-          <a href="/docs" className="hover:text-indigo-400 transition-colors font-bold text-[10px] uppercase tracking-widest">API Docs</a>
-        </div>
         <button 
           onClick={() => setShowInfo(true)}
           className="flex items-center gap-2 hover:text-indigo-600 dark:hover:text-indigo-400 transition-colors font-medium"

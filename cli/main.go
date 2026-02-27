@@ -38,6 +38,38 @@ type CreateSecretRequest struct {
 	Salt            *string `json:"salt,omitempty"`
 	ExpirationHours int     `json:"expirationHours"`
 	ViewLimit       int     `json:"viewLimit"`
+	PowNonce        string  `json:"powNonce,omitempty"`
+	PowSalt         string  `json:"powSalt,omitempty"`
+}
+
+type PoWChallenge struct {
+	Resource   string `json:"resource"`
+	Salt       string `json:"salt"`
+	Difficulty int    `json:"difficulty"`
+}
+
+func solvePoW(resource string, salt string, difficulty int) string {
+	fmt.Printf("Solving security challenge (difficulty: %d)... ", difficulty)
+	start := time.Now()
+	targetPrefix := strings.Repeat("0", difficulty)
+	var nonce int64 = 0
+
+	for {
+		header := fmt.Sprintf("1:%d:%s:%s:%d", difficulty, resource, salt, nonce)
+		hash := sha256.Sum256([]byte(header))
+
+		// Convert hash to binary string
+		var binary strings.Builder
+		for _, b := range hash {
+			binary.WriteString(fmt.Sprintf("%08b", b))
+		}
+
+		if strings.HasPrefix(binary.String(), targetPrefix) {
+			fmt.Printf("done in %v\n", time.Since(start).Round(time.Millisecond))
+			return fmt.Sprintf("%d", nonce)
+		}
+		nonce++
+	}
 }
 
 type CreateSecretResponse struct {
@@ -358,22 +390,34 @@ func handleCreate(args []string) {
 	ciphertextBase64 := base64.StdEncoding.EncodeToString(ciphertext)
 	encryptedData := ivBase64 + ":" + ciphertextBase64
 
-	// 3. Send to API
+	// 3. Solve PoW Challenge
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+	}
+
+	challengeResp, err := client.Get(cleanAPIURL + "/api/pow/challenge")
+	failOnError(err, "fetching security challenge")
+	defer challengeResp.Body.Close()
+
+	var challenge PoWChallenge
+	err = json.NewDecoder(challengeResp.Body).Decode(&challenge)
+	failOnError(err, "decoding security challenge")
+
+	nonce := solvePoW(challenge.Resource, challenge.Salt, challenge.Difficulty)
+
+	// 4. Send to API
 	reqBody := CreateSecretRequest{
 		EncryptedData:   encryptedData,
 		PasswordHash:    passwordHashBase64,
 		Salt:            saltBase64,
 		ExpirationHours: *expiration,
 		ViewLimit:       *views,
+		PowNonce:        nonce,
+		PowSalt:         challenge.Salt,
 	}
 
 	jsonData, err := json.Marshal(reqBody)
 	failOnError(err, "marshaling JSON")
-
-	// Use custom HTTP client with timeout
-	client := &http.Client{
-		Timeout: 15 * time.Second,
-	}
 
 	resp, err := client.Post(cleanAPIURL+"/api/secrets", "application/json", bytes.NewBuffer(jsonData))
 	if err != nil {

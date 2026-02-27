@@ -12,9 +12,10 @@ It's a simple tool that lets you create a **secure, one-time link** for your sen
 
 ### Key Features (in simple terms):
 
--   **🔒 Total Privacy (Zero-Knowledge)**: We can't read your secrets, even if we wanted to. All encryption happens in your browser.
--   **🔥 Self-Destructing Links**: Links are automatically deleted from the server after they are used.
--   **🔑 Password Protection**: You can add an extra layer of security with a password.
+-   **🔒 The Client-Side Advantage (Zero-Knowledge)**: Unlike many other "secure" sharing tools that encrypt data on their servers, SecureShare performs all encryption **locally in your browser**. We never see your plaintext data, and we never see your decryption keys.
+-   **🔥 Self-Destructing Links**: Links are automatically deleted from the server after they are used or expire.
+-   **🛡️ Anti-Spam Protection**: Built-in Proof of Work (Hashcash) prevents automated bots from flooding the service.
+-   **🔑 Password Protection**: Add an extra layer of security with a password (also hashed locally).
 -   **📱 Easy Mobile Sharing**: Generate a QR code to securely transfer the link to your mobile device.
 -   **🛡️ Admin Dashboard**: Multi-user management with 2FA (TOTP) and detailed audit logs.
 
@@ -37,9 +38,10 @@ When an optional access password is set, we don't use it directly as a key.
 - **Mechanism**: PBKDF2 with 100,000 iterations and SHA-256.
 - **Salt**: Every secret has a unique, cryptographically secure random salt generated on the client.
 
-#### 3. Brute-Force Protection
-To prevent automated guessing of access passwords:
-- **Limit**: A secret is **permanently deleted** from the database after 3 failed password attempts.
+#### 3. Brute-Force & Anti-Spam Protection
+To prevent automated guessing and service abuse:
+- **Proof of Work (PoW)**: All secret creation requests must solve a Hashcash-style challenge. This forces clients to spend CPU time, making large-scale spam or DoS attacks economically unfeasible while remaining invisible to legitimate users.
+- **Auto-Destruction**: A secret is **permanently deleted** from the database after 3 failed password attempts.
 - **Rate Limiting**: Strict IP-based and global rate limits are enforced on all API endpoints.
 
 ### 🏛️ Architecture

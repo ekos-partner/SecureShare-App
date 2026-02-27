@@ -151,6 +151,8 @@ const CreateSecretSchema = z.object({
   salt: z.string().nullable().optional(),
   expirationHours: z.union([z.string(), z.number()]).transform(Number),
   viewLimit: z.union([z.string(), z.number()]).transform(Number),
+  powNonce: z.string().optional(),
+  powSalt: z.string().optional(),
 });
 
 const BurnSecretSchema = z.object({
@@ -431,6 +433,51 @@ const authLimiter = rateLimit({
   message: { error: "Too many failed attempts. Please wait 15 minutes." }
 });
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS pow_nonces (
+    id TEXT PRIMARY KEY,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  )
+`);
+
+// Cleanup old PoW nonces every hour
+setInterval(() => {
+  db.prepare("DELETE FROM pow_nonces WHERE created_at < datetime('now', '-10 minutes')").run();
+}, 3600000);
+
+// Rate limiting configurations
+const POW_DIFFICULTY = 18; // ~250ms-500ms on modern CPUs. Adjust as needed.
+
+/**
+ * PROOF OF WORK (HASHCASH) HELPERS
+ */
+function verifyPoW(resource: string, salt: string, nonce: string, difficulty: number): boolean {
+  // 1. Check if salt is expired (salt format: timestamp_random)
+  const parts = salt.split('_');
+  if (parts.length !== 2) return false;
+  const timestamp = parseInt(parts[0], 10);
+  const now = Date.now();
+  if (isNaN(timestamp) || now - timestamp > 600000) return false; // 10 minutes expiry
+
+  // 2. Check for replay attack
+  const powId = `${salt}:${nonce}`;
+  try {
+    db.prepare("INSERT INTO pow_nonces (id) VALUES (?)").run(powId);
+  } catch {
+    return false; // Already used
+  }
+
+  const header = `1:${difficulty}:${resource}:${salt}:${nonce}`;
+  const hash = crypto.createHash('sha256').update(header).digest('hex');
+  
+  const hexToBinary = (hex: string) => {
+    return hex.split('').map(h => parseInt(h, 16).toString(2).padStart(4, '0')).join('');
+  };
+  
+  const binaryHash = hexToBinary(hash);
+  return binaryHash.startsWith('0'.repeat(difficulty));
+}
+
 /**
  * API ENDPOINTS
  */
@@ -438,6 +485,17 @@ const authLimiter = rateLimit({
 // Create a new secret
 app.get("/api/health", (req, res) => {
   res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// Get PoW Challenge
+app.get("/api/pow/challenge", (req, res) => {
+  const salt = `${Date.now()}_${crypto.randomBytes(8).toString('hex')}`;
+  res.json({
+    resource: 'secureshare',
+    salt,
+    difficulty: POW_DIFFICULTY,
+    timestamp: Date.now()
+  });
 });
 
 app.get("/api/admin/csrf-token", authenticateAdmin, csrfProtection, (req, res) => {
@@ -525,6 +583,11 @@ app.post("/api/admin/login", authLimiter, async (req, res) => {
     mustChangePassword: !!user.must_change_password,
     username: user.username
   });
+});
+
+app.post("/api/admin/logout", authenticateAdmin, csrfProtection, (req, res) => {
+  res.clearCookie('admin_token');
+  res.json({ success: true });
 });
 
 app.post("/api/admin/change-password", authenticateAdmin, csrfProtection, async (req, res) => {
@@ -688,6 +751,22 @@ app.delete("/api/admin/keys/:id", authenticateAdmin, csrfProtection, (req, res) 
 });
 
 app.post("/api/secrets", createLimiter, verifyApiKey, (req, res) => {
+  const { powNonce, powSalt } = req.body;
+  const apiKey = req.headers['x-api-key'];
+
+  // Verify Proof of Work
+  // Exempt requests authenticated with a valid API Key
+  const isApiKeyAuthenticated = !!apiKey; // verifyApiKey middleware ensures if apiKey is present, it's valid or next() is not called with error
+
+  if (!isApiKeyAuthenticated && (process.env.NODE_ENV === 'production' || req.headers['x-enforce-pow'])) {
+    if (!powNonce || !powSalt || !verifyPoW('secureshare', powSalt, powNonce, POW_DIFFICULTY)) {
+      return res.status(402).json({ 
+        error: "Proof of Work required. Solve challenge first.",
+        challenge_url: "/api/pow/challenge"
+      });
+    }
+  }
+
   const result = CreateSecretSchema.safeParse(req.body);
   if (!result.success) {
     return res.status(400).json({ error: "Invalid input data", details: result.error.format() });
