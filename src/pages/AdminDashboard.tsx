@@ -71,6 +71,7 @@ export default function AdminDashboard() {
   const [users, setUsers] = useState<User[]>([]);
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [uptimeSeconds, setUptimeSeconds] = useState<number>(0);
+  const [csrfToken, setCsrfToken] = useState('');
   const [newKeyName, setNewKeyName] = useState('');
   const [generatedKey, setGeneratedKey] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
@@ -88,12 +89,26 @@ export default function AdminDashboard() {
 
   useEffect(() => {
     if (isLoggedIn) {
-      fetchStats();
-      fetchKeys();
-      fetchUsers();
-      fetchLogs();
+      fetchCsrfToken().then(() => {
+        fetchStats();
+        fetchKeys();
+        fetchUsers();
+        fetchLogs();
+      });
     }
   }, [isLoggedIn]);
+
+  const fetchCsrfToken = async () => {
+    try {
+      const res = await fetch('/api/admin/csrf-token');
+      if (res.ok) {
+        const data = await res.json();
+        setCsrfToken(data.csrfToken);
+      }
+    } catch (err) {
+      console.error('Failed to fetch CSRF token:', err);
+    }
+  };
 
   useEffect(() => {
     if (!isLoggedIn) return;
@@ -136,8 +151,12 @@ export default function AdminDashboard() {
   };
 
   const handleLogout = async () => {
-    await fetch('/api/admin/logout', { method: 'POST' });
+    await fetch('/api/admin/logout', { 
+      method: 'POST',
+      headers: { 'X-CSRF-Token': csrfToken }
+    });
     setIsLoggedIn(false);
+    setCsrfToken('');
     setRequiresTotp(false);
     setTotpToken('');
     setPassword('');
@@ -176,7 +195,10 @@ export default function AdminDashboard() {
     try {
       const res = await fetch('/api/admin/users', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken
+        },
         body: JSON.stringify({ username: newUserName.trim(), password: newUserPassword })
       });
       if (res.ok) {
@@ -195,7 +217,10 @@ export default function AdminDashboard() {
 
   const handleDeleteUser = async (id: string) => {
     if (!confirm('Are you sure you want to delete this user?')) return;
-    const res = await fetch(`/api/admin/users/${id}`, { method: 'DELETE' });
+    const res = await fetch(`/api/admin/users/${id}`, { 
+      method: 'DELETE',
+      headers: { 'X-CSRF-Token': csrfToken }
+    });
     if (res.ok) {
       fetchUsers();
       fetchLogs();
@@ -208,7 +233,10 @@ export default function AdminDashboard() {
   const handleSetupTotp = async () => {
     setError('');
     try {
-      const res = await fetch('/api/admin/totp/setup', { method: 'POST' });
+      const res = await fetch('/api/admin/totp/setup', { 
+        method: 'POST',
+        headers: { 'X-CSRF-Token': csrfToken }
+      });
       if (res.ok) {
         setTotpSetupData(await res.json());
       } else {
@@ -224,7 +252,10 @@ export default function AdminDashboard() {
   const handleVerifyTotp = async () => {
     const res = await fetch('/api/admin/totp/verify', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 
+        'Content-Type': 'application/json',
+        'X-CSRF-Token': csrfToken
+      },
       body: JSON.stringify({ token: totpVerifyToken })
     });
     if (res.ok) {
@@ -240,7 +271,10 @@ export default function AdminDashboard() {
 
   const handleDisableTotp = async () => {
     if (!confirm('Are you sure you want to disable 2FA?')) return;
-    const res = await fetch('/api/admin/totp/disable', { method: 'POST' });
+    const res = await fetch('/api/admin/totp/disable', { 
+      method: 'POST',
+      headers: { 'X-CSRF-Token': csrfToken }
+    });
     if (res.ok) {
       fetchUsers();
       fetchLogs();
@@ -253,7 +287,10 @@ export default function AdminDashboard() {
     try {
       const res = await fetch('/api/admin/keys', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken
+        },
         body: JSON.stringify({ name: newKeyName })
       });
       if (res.ok) {
@@ -270,7 +307,10 @@ export default function AdminDashboard() {
 
   const handleDeleteKey = async (id: string) => {
     if (!confirm('Are you sure you want to delete this API key?')) return;
-    const res = await fetch(`/api/admin/keys/${id}`, { method: 'DELETE' });
+    const res = await fetch(`/api/admin/keys/${id}`, { 
+      method: 'DELETE',
+      headers: { 'X-CSRF-Token': csrfToken }
+    });
     if (res.ok) {
       fetchKeys();
       fetchStats();
@@ -284,7 +324,10 @@ export default function AdminDashboard() {
     try {
       const res = await fetch('/api/admin/change-password', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken
+        },
         body: JSON.stringify({ newPassword: newAdminPassword })
       });
       if (res.ok) {

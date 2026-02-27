@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import crypto from 'crypto';
+import bcrypt from 'bcrypt';
 import Database from 'better-sqlite3';
 import dotenv from 'dotenv';
 import path from 'path';
@@ -13,7 +13,7 @@ dotenv.config({ path: path.resolve(process.cwd(), '.env') });
 
 const DB_PATH = process.env.DB_PATH || path.resolve(process.cwd(), 'data', 'secrets.db');
 
-function resetAdminPassword() {
+async function resetAdminPassword() {
   const newPassword = process.argv[2];
 
   if (!newPassword) {
@@ -37,7 +37,7 @@ function resetAdminPassword() {
       process.exit(1);
     }
 
-    const newPasswordHash = crypto.createHash('sha256').update(newPassword).digest('hex');
+    const newPasswordHash = await bcrypt.hash(newPassword, 12);
 
     // Reset password and force change flag to 0
     const stmt = db.prepare("UPDATE users SET password_hash = ?, must_change_password = 0 WHERE username = 'admin'");

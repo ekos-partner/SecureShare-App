@@ -29,6 +29,7 @@ import cookieParser from 'cookie-parser';
 import { authenticator } from 'otplib';
 import QRCode from 'qrcode';
 import bcrypt from 'bcrypt';
+import csrf from 'csurf';
 
 /**
  * DATABASE INITIALIZATION
@@ -260,6 +261,15 @@ initializeRootUser().catch(console.error);
 
 app.use(cookieParser());
 
+// CSRF Protection for admin routes
+const csrfProtection = csrf({ 
+  cookie: {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'strict'
+  }
+});
+
 // Disable X-Powered-By to prevent technology fingerprinting (Proxy Disclosure)
 app.disable('x-powered-by');
 
@@ -365,7 +375,7 @@ const authenticateAdmin = (req: express.Request, res: express.Response, next: ex
 /**
  * API KEY VERIFICATION MIDDLEWARE
  */
-const verifyApiKey = (req: express.Request, res: express.Response, next: express.NextFunction) => {
+const verifyApiKey = async (req: express.Request, res: express.Response, next: express.NextFunction) => {
   const apiKey = req.headers['x-api-key'] as string;
   
   // If no API key is provided, we allow it (for the web UI/CLI backward compatibility)
@@ -379,8 +389,8 @@ const verifyApiKey = (req: express.Request, res: express.Response, next: express
     const keyData = db.prepare("SELECT * FROM api_keys WHERE id = ?").get(id) as { key_hash: string } | undefined;
     if (!keyData) return res.status(401).json({ error: "Invalid API Key" });
 
-    const hash = crypto.createHash('sha256').update(rawKey).digest('hex');
-    if (hash !== keyData.key_hash) return res.status(401).json({ error: "Invalid API Key" });
+    const isKeyValid = await bcrypt.compare(rawKey, keyData.key_hash);
+    if (!isKeyValid) return res.status(401).json({ error: "Invalid API Key" });
 
     // Update usage stats
     db.prepare("UPDATE api_keys SET last_used_at = CURRENT_TIMESTAMP, usage_count = usage_count + 1 WHERE id = ?").run(id);
@@ -428,6 +438,10 @@ const authLimiter = rateLimit({
 // Create a new secret
 app.get("/api/health", (req, res) => {
   res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+app.get("/api/admin/csrf-token", authenticateAdmin, csrfProtection, (req, res) => {
+  res.json({ csrfToken: req.csrfToken() });
 });
 
 /**
@@ -513,7 +527,7 @@ app.post("/api/admin/login", authLimiter, async (req, res) => {
   });
 });
 
-app.post("/api/admin/change-password", authenticateAdmin, async (req, res) => {
+app.post("/api/admin/change-password", authenticateAdmin, csrfProtection, async (req, res) => {
   const { newPassword } = req.body;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const user = (req as any).user as UserRow;
@@ -534,7 +548,7 @@ app.get("/api/admin/users", authenticateAdmin, (req, res) => {
   res.json(users);
 });
 
-app.post("/api/admin/users", authenticateAdmin, async (req, res) => {
+app.post("/api/admin/users", authenticateAdmin, csrfProtection, async (req, res) => {
   const { username, password } = req.body;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const admin = (req as any).user as UserRow;
@@ -561,7 +575,7 @@ app.post("/api/admin/users", authenticateAdmin, async (req, res) => {
   }
 });
 
-app.delete("/api/admin/users/:id", authenticateAdmin, (req, res) => {
+app.delete("/api/admin/users/:id", authenticateAdmin, csrfProtection, (req, res) => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const admin = (req as any).user as UserRow;
   const targetId = req.params.id;
@@ -578,7 +592,7 @@ app.delete("/api/admin/users/:id", authenticateAdmin, (req, res) => {
   res.json({ success: true });
 });
 
-app.post("/api/admin/totp/setup", authenticateAdmin, async (req, res) => {
+app.post("/api/admin/totp/setup", authenticateAdmin, csrfProtection, async (req, res) => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const user = (req as any).user as UserRow;
   const secret = authenticator.generateSecret();
@@ -595,7 +609,7 @@ app.post("/api/admin/totp/setup", authenticateAdmin, async (req, res) => {
   }
 });
 
-app.post("/api/admin/totp/verify", authenticateAdmin, (req, res) => {
+app.post("/api/admin/totp/verify", authenticateAdmin, csrfProtection, (req, res) => {
   const { token } = req.body;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const user = (req as any).user as UserRow;
@@ -613,7 +627,7 @@ app.post("/api/admin/totp/verify", authenticateAdmin, (req, res) => {
   }
 });
 
-app.post("/api/admin/totp/disable", authenticateAdmin, (req, res) => {
+app.post("/api/admin/totp/disable", authenticateAdmin, csrfProtection, (req, res) => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const user = (req as any).user as UserRow;
   db.prepare("UPDATE users SET is_totp_enabled = 0, totp_secret = NULL WHERE id = ?").run(user.id);
@@ -644,7 +658,7 @@ app.get("/api/admin/keys", authenticateAdmin, (req, res) => {
   res.json(keys);
 });
 
-app.post("/api/admin/keys", authenticateAdmin, (req, res) => {
+app.post("/api/admin/keys", authenticateAdmin, csrfProtection, async (req, res) => {
   const { name } = req.body;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const admin = (req as any).user as UserRow;
@@ -652,7 +666,7 @@ app.post("/api/admin/keys", authenticateAdmin, (req, res) => {
 
   const id = crypto.randomBytes(4).toString('hex');
   const rawKey = crypto.randomBytes(32).toString('hex');
-  const hash = crypto.createHash('sha256').update(rawKey).digest('hex');
+  const hash = await bcrypt.hash(rawKey, 10); // API keys don't need 12 rounds, 10 is enough and faster
 
   db.prepare("INSERT INTO api_keys (id, name, key_hash) VALUES (?, ?, ?)").run(id, name, hash);
   logAction("API_KEY_CREATED", admin.id, admin.username, req.ip || "unknown", `Created key ${name}`);
@@ -660,11 +674,12 @@ app.post("/api/admin/keys", authenticateAdmin, (req, res) => {
   res.json({
     id,
     name,
-    apiKey: `${id}.${rawKey}` // Only shown once
+    apiKey: `${id}.${rawKey}`, // Only shown once
+    csrfToken: req.csrfToken ? req.csrfToken() : undefined
   });
 });
 
-app.delete("/api/admin/keys/:id", authenticateAdmin, (req, res) => {
+app.delete("/api/admin/keys/:id", authenticateAdmin, csrfProtection, (req, res) => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const admin = (req as any).user as UserRow;
   db.prepare("DELETE FROM api_keys WHERE id = ?").run(req.params.id);
