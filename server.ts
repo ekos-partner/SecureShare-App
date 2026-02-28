@@ -315,8 +315,6 @@ async function initializeRootUser() {
 }
 initializeRootUser().catch(console.error);
 
-app.use(cookieParser());
-
 // CSRF Protection for admin routes
 const csrfProtection = csrf({ 
   cookie: {
@@ -325,6 +323,8 @@ const csrfProtection = csrf({
     sameSite: 'strict'
   }
 });
+
+app.use('/api/admin', cookieParser(), csrfProtection);
 
 // Disable X-Powered-By to prevent technology fingerprinting (Proxy Disclosure)
 app.disable('x-powered-by');
@@ -773,7 +773,7 @@ app.get("/api/pow/challenge", (req, res) => {
   });
 });
 
-app.get("/api/admin/csrf-token", authenticateAdmin, csrfProtection, (req, res) => {
+app.get("/api/admin/csrf-token", (req, res) => {
   res.json({ csrfToken: req.csrfToken() });
 });
 
@@ -822,15 +822,12 @@ app.post("/api/admin/login", authLimiter, async (req, res) => {
   const isLegacyHash = user.password_hash.length === 64 && !user.password_hash.startsWith('$2');
 
   if (isLegacyHash) {
-    const legacyHash = crypto.createHash('sha256').update(trimmedPassword).digest('hex');
-    isPasswordValid = legacyHash === user.password_hash;
-    
-    if (isPasswordValid) {
-      // Migrate to bcrypt
-      const newHash = await bcrypt.hash(trimmedPassword, 12);
-      db.prepare("UPDATE users SET password_hash = ? WHERE id = ?").run(newHash, user.id);
-      console.log(`[Security] Migrated user ${trimmedUsername} from SHA-256 to bcrypt.`);
-    }
+    // Legacy SHA-256-based password hashes are no longer accepted to avoid using
+    // a fast, insecure hashing scheme on user-supplied passwords. Force a safer
+    // migration path (for example, via a password reset flow) instead of
+    // recomputing the legacy hash here.
+    logAction("LOGIN_FAILED_LEGACY_HASH", user.id, trimmedUsername, ip, "Legacy password hash requires reset");
+    return res.status(403).json({ error: "Password reset required for this account." });
   } else {
     isPasswordValid = await bcrypt.compare(trimmedPassword, user.password_hash);
   }
@@ -895,12 +892,12 @@ app.post("/api/admin/login", authLimiter, async (req, res) => {
   });
 });
 
-app.post("/api/admin/logout", authenticateAdmin, csrfProtection, (req, res) => {
+app.post("/api/admin/logout", authenticateAdmin, (req, res) => {
   res.clearCookie('admin_token');
   res.json({ success: true });
 });
 
-app.post("/api/admin/change-password", authenticateAdmin, csrfProtection, async (req, res) => {
+app.post("/api/admin/change-password", authenticateAdmin, async (req, res) => {
   const { newPassword } = req.body;
   const user = (req as AuthenticatedRequest).user as UserRow;
 
@@ -926,7 +923,7 @@ app.get("/api/admin/users", authenticateAdmin, (req, res) => {
   res.json(users);
 });
 
-app.post("/api/admin/users", authenticateAdmin, csrfProtection, async (req, res) => {
+app.post("/api/admin/users", authenticateAdmin, async (req, res) => {
   const { username, password } = req.body;
   const admin = (req as AuthenticatedRequest).user as UserRow;
 
@@ -951,7 +948,7 @@ app.post("/api/admin/users", authenticateAdmin, csrfProtection, async (req, res)
   }
 });
 
-app.delete("/api/admin/users/:id", authenticateAdmin, csrfProtection, (req, res) => {
+app.delete("/api/admin/users/:id", authenticateAdmin, (req, res) => {
   const admin = (req as AuthenticatedRequest).user as UserRow;
   const targetId = req.params.id;
 
@@ -967,7 +964,7 @@ app.delete("/api/admin/users/:id", authenticateAdmin, csrfProtection, (req, res)
   res.json({ success: true });
 });
 
-app.post("/api/admin/users/:id/reset-2fa", authenticateAdmin, csrfProtection, (req, res) => {
+app.post("/api/admin/users/:id/reset-2fa", authenticateAdmin, (req, res) => {
   const admin = (req as AuthenticatedRequest).user as UserRow;
   const targetId = req.params.id;
 
@@ -979,7 +976,7 @@ app.post("/api/admin/users/:id/reset-2fa", authenticateAdmin, csrfProtection, (r
   res.json({ success: true });
 });
 
-app.post("/api/admin/totp/setup", authenticateAdmin, csrfProtection, async (req, res) => {
+app.post("/api/admin/totp/setup", authenticateAdmin, async (req, res) => {
   try {
     const user = (req as AuthenticatedRequest).user as UserRow;
     console.log(`[TOTP] Setting up 2FA for user: ${user.username}`);
@@ -1000,7 +997,7 @@ app.post("/api/admin/totp/setup", authenticateAdmin, csrfProtection, async (req,
   }
 });
 
-app.post("/api/admin/totp/verify", authenticateAdmin, csrfProtection, async (req, res) => {
+app.post("/api/admin/totp/verify", authenticateAdmin, async (req, res) => {
   const { token } = req.body;
   const user = (req as AuthenticatedRequest).user as UserRow;
 
@@ -1022,7 +1019,7 @@ app.post("/api/admin/totp/verify", authenticateAdmin, csrfProtection, async (req
   }
 });
 
-app.post("/api/admin/totp/disable", authenticateAdmin, csrfProtection, (req, res) => {
+app.post("/api/admin/totp/disable", authenticateAdmin, (req, res) => {
   const user = (req as AuthenticatedRequest).user as UserRow;
   db.prepare("UPDATE users SET is_totp_enabled = 0, totp_secret = NULL, backup_codes = NULL WHERE id = ?").run(user.id);
   logAction("TOTP_DISABLED", user.id, user.username, req.ip || "unknown");
@@ -1052,7 +1049,7 @@ app.get("/api/admin/keys", authenticateAdmin, (req, res) => {
   res.json(keys);
 });
 
-app.post("/api/admin/keys", authenticateAdmin, csrfProtection, async (req, res) => {
+app.post("/api/admin/keys", authenticateAdmin, async (req, res) => {
   const { name } = req.body;
   const admin = (req as AuthenticatedRequest).user as UserRow;
   if (!name) return res.status(400).json({ error: "Name is required" });
@@ -1072,7 +1069,7 @@ app.post("/api/admin/keys", authenticateAdmin, csrfProtection, async (req, res) 
   });
 });
 
-app.delete("/api/admin/keys/:id", authenticateAdmin, csrfProtection, (req, res) => {
+app.delete("/api/admin/keys/:id", authenticateAdmin, (req, res) => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const admin = (req as any).user as UserRow;
   db.prepare("DELETE FROM api_keys WHERE id = ?").run(req.params.id);

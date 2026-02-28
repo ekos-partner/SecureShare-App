@@ -98,6 +98,21 @@ export default function AdminDashboard() {
   // Check session on mount
   useEffect(() => {
     setIsWebauthnSupported(window.PublicKeyCredential !== undefined);
+    
+    const fetchCsrfToken = async () => {
+      try {
+        const res = await fetch('/api/admin/csrf-token');
+        if (res.ok) {
+          const data = await res.json();
+          setCsrfToken(data.csrfToken);
+          return data.csrfToken;
+        }
+      } catch (err) {
+        console.error('Failed to fetch CSRF token:', err);
+      }
+      return null;
+    };
+
     const checkSession = async () => {
       try {
         const res = await fetch('/api/admin/me');
@@ -121,18 +136,21 @@ export default function AdminDashboard() {
         console.error('Session check failed:', err);
       }
     };
-    checkSession();
+
+    const init = async () => {
+      await fetchCsrfToken();
+      await checkSession();
+    };
+    init();
   }, []);
 
   useEffect(() => {
     if (isLoggedIn) {
-      fetchCsrfToken().then(() => {
-        fetchStats();
-        fetchKeys();
-        fetchUsers();
-        fetchLogs();
-        fetchWebauthnKeys();
-      });
+      fetchStats();
+      fetchKeys();
+      fetchUsers();
+      fetchLogs();
+      fetchWebauthnKeys();
     }
   }, [isLoggedIn]);
 
@@ -211,7 +229,10 @@ export default function AdminDashboard() {
     try {
       const optionsRes = await fetch('/api/admin/webauthn/login/options', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken
+        },
         body: JSON.stringify({ username })
       });
       if (!optionsRes.ok) {
@@ -224,7 +245,10 @@ export default function AdminDashboard() {
 
       const verifyRes = await fetch('/api/admin/webauthn/login/verify', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken
+        },
         body: JSON.stringify({ body: assertion, username })
       });
 
@@ -243,17 +267,7 @@ export default function AdminDashboard() {
     }
   };
 
-  const fetchCsrfToken = async () => {
-    try {
-      const res = await fetch('/api/admin/csrf-token');
-      if (res.ok) {
-        const data = await res.json();
-        setCsrfToken(data.csrfToken);
-      }
-    } catch (err) {
-      console.error('Failed to fetch CSRF token:', err);
-    }
-  };
+
 
   useEffect(() => {
     if (!isLoggedIn) return;
@@ -270,7 +284,10 @@ export default function AdminDashboard() {
     try {
       const res = await fetch('/api/admin/login', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken
+        },
         body: JSON.stringify({ username, password, totpToken })
       });
       const data = await res.json();
