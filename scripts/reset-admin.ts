@@ -1,5 +1,7 @@
 import Database from "better-sqlite3";
-import bcrypt from "bcrypt";
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const bcrypt = require("bcrypt");
 import path from "node:path";
 import fs from "node:fs";
 import dotenv from "dotenv";

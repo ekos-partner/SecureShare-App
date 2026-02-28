@@ -253,6 +253,7 @@ function handleViewLimit(db: Database.Database, secret: any) {
 }
 
 const app = express();
+app.set('trust proxy', 1); // Trust the first proxy (Cloud Run, Nginx, etc.)
 const PORT = Number.parseInt(process.env.PORT || "3000", 10);
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 
@@ -455,7 +456,7 @@ const verifyApiKey = async (req: express.Request, res: express.Response, next: e
  */
 const globalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 100, // Secure limit for general API usage
+  max: 300, // Increased limit for general API usage
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: "Too many requests from this IP, please try again later." }
