@@ -26,8 +26,31 @@ import crypto from 'node:crypto';
 import ejs from 'ejs';
 import jwt from 'jsonwebtoken';
 import cookieParser from 'cookie-parser';
-import { authenticator } from 'otplib';
-import QRCode from 'qrcode';
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+
+// Bulletproof otplib authenticator extraction
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let authenticator: any;
+try {
+  const otplibPkg = require('otplib');
+  // Try different common export patterns for otplib
+  authenticator = otplibPkg.authenticator || 
+                  (otplibPkg.default && otplibPkg.default.authenticator) || 
+                  otplibPkg;
+  
+  if (authenticator && typeof authenticator === 'object') {
+    authenticator.options = { 
+      window: [1, 1] // Allow for slight time drift (1 step = 30s before and after)
+    };
+    console.log("2FA Authenticator initialized successfully.");
+  } else {
+    console.error("CRITICAL: Could not find authenticator in otplib package structure.");
+  }
+} catch (err) {
+  console.error("FAILED to load otplib:", err);
+}
+import * as QRCode from 'qrcode';
 import bcrypt from 'bcrypt';
 import csrf from 'csurf';
 
@@ -40,19 +63,31 @@ import csrf from 'csurf';
  * to avoid data loss on container restarts.
  */
 const getDatabase = () => {
-  const dbPath = process.env.DB_PATH || path.join(process.cwd(), "secrets.db");
+  // In production environments like Cloud Run, we prefer a path that might be mapped to a volume
+  // or at least a consistent location.
+  const dbPath = process.env.DB_PATH || path.join(process.cwd(), "data", "secrets.db");
+  
+  // Ensure the directory exists
+  const dbDir = path.dirname(dbPath);
+  if (!fs.existsSync(dbDir)) {
+    try {
+      fs.mkdirSync(dbDir, { recursive: true });
+    } catch {
+      console.warn(`Failed to create directory ${dbDir}, falling back to temp storage`);
+    }
+  }
+
   try {
     return new Database(dbPath);
-  } catch (err) {
+  } catch {
     // Fallback to a secure temporary directory for environments with read-only filesystems
     try {
-      const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'secureshare-'));
-      const tmpDbPath = path.join(tmpDir, 'secrets.db');
-      console.warn(`Failed to open database at ${dbPath}, using secure temporary database at ${tmpDbPath}`);
+      const tmpDbPath = path.join(os.tmpdir(), 'secureshare-secrets.db');
+      console.warn(`Failed to open database at ${dbPath}, using temporary database at ${tmpDbPath}. DATA WILL BE LOST ON RESTART.`);
       return new Database(tmpDbPath);
     } catch (error) {
       console.error('Failed to create temporary database:', error);
-      throw err;
+      throw new Error(`Could not open database at ${dbPath} and failed to create fallback.`);
     }
   }
 };
@@ -108,6 +143,7 @@ db.exec(`
     must_change_password INTEGER DEFAULT 0,
     totp_secret TEXT,
     is_totp_enabled INTEGER DEFAULT 0,
+    backup_codes TEXT,
     failed_attempts INTEGER DEFAULT 0,
     lockout_until DATETIME,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -123,6 +159,27 @@ db.exec(`
     username TEXT,
     ip_address TEXT,
     details TEXT
+  )
+`);
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS webauthn_credentials (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    public_key BLOB NOT NULL,
+    counter INTEGER NOT NULL,
+    transports TEXT,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+  )
+`);
+
+db.exec(`
+  CREATE TABLE IF NOT EXISTS webauthn_challenges (
+    id TEXT PRIMARY KEY,
+    challenge TEXT NOT NULL,
+    user_id TEXT,
+    expires_at DATETIME NOT NULL
   )
 `);
 
@@ -212,19 +269,16 @@ const app = express();
 const PORT = Number.parseInt(process.env.PORT || "3000", 10);
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
 
-// JWT Secret security check
+  // JWT Secret security check
 const getJwtSecret = () => {
   const secret = process.env.JWT_SECRET;
-  if (process.env.NODE_ENV === "production") {
-    if (!secret || secret.length < 32) {
-      console.error("CRITICAL: JWT_SECRET must be set in environment and be at least 32 characters long in production!");
-      process.exit(1);
+  // Always use a random secret if not provided, even in dev, to prevent predictable tokens
+  if (!secret || secret === "dev-secret-key-change-this-in-prod") {
+    if (process.env.NODE_ENV === "production") {
+      console.error("CRITICAL: JWT_SECRET must be set in environment in production!");
     }
-    return secret;
-  }
-  if (!secret) {
-    console.warn("WARNING: JWT_SECRET not set. Using temporary random secret. Admin sessions will reset on restart.");
-    return crypto.randomBytes(32).toString('hex');
+    // Use a stable random secret for the process lifetime if fallback not provided
+    return process.env.JWT_SECRET_FALLBACK || crypto.randomBytes(32).toString('hex');
   }
   return secret;
 };
@@ -301,9 +355,9 @@ if (process.env.NODE_ENV === "production") {
     contentSecurityPolicy: {
       directives: {
         defaultSrc: ["'self'"],
-        scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", (req, res) => `'nonce-${res.locals.nonce}'`],
+        scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", (req, res) => `'nonce-${(res as express.Response).locals.nonce}'`],
         // Allow inline styles for React/Motion
-        styleSrc: ["'self'", "'unsafe-inline'", (req, res) => `'nonce-${res.locals.nonce}'`, "https://fonts.googleapis.com"],
+        styleSrc: ["'self'", "'unsafe-inline'", (req, res) => `'nonce-${(res as express.Response).locals.nonce}'`, "https://fonts.googleapis.com"],
         fontSrc: ["'self'", "https://fonts.gstatic.com"],
         imgSrc: ["'self'", "data:", "https://picsum.photos", "blob:"],
         // Restrict connectSrc
@@ -348,9 +402,14 @@ interface UserRow {
   must_change_password: number;
   totp_secret: string | null;
   is_totp_enabled: number;
+  backup_codes: string | null;
   failed_attempts: number;
   lockout_until: string | null;
   created_at: string;
+}
+
+interface AuthenticatedRequest extends express.Request {
+  user?: UserRow;
 }
 
 /**
@@ -495,6 +554,205 @@ function verifyPoW(resource: string, salt: string, nonce: string, difficulty: nu
   return binaryHash.startsWith('0'.repeat(difficulty));
 }
 
+import {
+  generateRegistrationOptions,
+  verifyRegistrationResponse,
+  generateAuthenticationOptions,
+  verifyAuthenticationResponse,
+} from '@simplewebauthn/server';
+import { isoBase64URL } from '@simplewebauthn/server/helpers';
+
+const RP_NAME = 'SecureShare Admin';
+const RP_ID = process.env.RP_ID || 'localhost';
+const ORIGIN = process.env.APP_URL || `http://${RP_ID}:3000`;
+
+/**
+ * WEBAUTHN API ROUTES
+ */
+
+// Registration Options
+app.post("/api/admin/webauthn/register/options", authenticateAdmin, (req, res) => {
+  const user = (req as AuthenticatedRequest).user as UserRow;
+  
+  const userCredentials = db.prepare("SELECT id FROM webauthn_credentials WHERE user_id = ?").all(user.id) as { id: string }[];
+  
+  const options = generateRegistrationOptions({
+    rpName: RP_NAME,
+    rpID: RP_ID,
+    userID: user.id,
+    userName: user.username,
+    attestationType: 'none',
+    excludeCredentials: userCredentials.map(cred => ({
+      id: cred.id,
+      type: 'public-key',
+    })),
+    authenticatorSelection: {
+      residentKey: 'preferred',
+      userVerification: 'preferred',
+    },
+  });
+
+  // Store challenge
+  const challengeId = uuidv4();
+  db.prepare("INSERT INTO webauthn_challenges (id, challenge, user_id, expires_at) VALUES (?, ?, ?, ?)")
+    .run(challengeId, options.challenge, user.id, new Date(Date.now() + 5 * 60 * 1000).toISOString());
+
+  res.cookie('webauthn_challenge_id', challengeId, { httpOnly: true, secure: true, sameSite: 'none', maxAge: 5 * 60 * 1000 });
+  res.json(options);
+});
+
+// Registration Verification
+app.post("/api/admin/webauthn/register/verify", authenticateAdmin, async (req, res) => {
+  const user = (req as AuthenticatedRequest).user as UserRow;
+  const { body } = req;
+  const challengeId = req.cookies.webauthn_challenge_id;
+
+  if (!challengeId) return res.status(400).json({ error: "Missing challenge" });
+
+  const challengeRow = db.prepare("SELECT * FROM webauthn_challenges WHERE id = ? AND user_id = ?").get(challengeId, user.id) as { challenge: string, expires_at: string } | undefined;
+  
+  if (!challengeRow || new Date(challengeRow.expires_at) < new Date()) {
+    return res.status(400).json({ error: "Invalid or expired challenge" });
+  }
+
+  db.prepare("DELETE FROM webauthn_challenges WHERE id = ?").run(challengeId);
+  res.clearCookie('webauthn_challenge_id');
+
+  try {
+    const verification = await verifyRegistrationResponse({
+      response: body,
+      expectedChallenge: challengeRow.challenge,
+      expectedOrigin: ORIGIN,
+      expectedRPID: RP_ID,
+    });
+
+    if (verification.verified && verification.registrationInfo) {
+      const { credentialPublicKey, credentialID, counter } = verification.registrationInfo;
+
+      db.prepare("INSERT INTO webauthn_credentials (id, user_id, public_key, counter, transports) VALUES (?, ?, ?, ?, ?)")
+        .run(
+          isoBase64URL.fromBuffer(credentialID),
+          user.id,
+          Buffer.from(credentialPublicKey),
+          counter,
+          JSON.stringify(body.response.transports || [])
+        );
+
+      logAction("WEBAUTHN_REGISTER_SUCCESS", user.id, user.username, req.ip || "unknown");
+      res.json({ verified: true });
+    } else {
+      res.status(400).json({ error: "Verification failed" });
+    }
+  } catch (error) {
+    console.error(error);
+    res.status(400).json({ error: "Verification error" });
+  }
+});
+
+// Get WebAuthn Credentials
+app.get("/api/admin/webauthn/credentials", authenticateAdmin, (req, res) => {
+  const user = (req as AuthenticatedRequest).user as UserRow;
+  const credentials = db.prepare("SELECT id, created_at FROM webauthn_credentials WHERE user_id = ?").all(user.id);
+  res.json(credentials);
+});
+
+// Delete WebAuthn Credential
+app.delete("/api/admin/webauthn/credentials/:id", authenticateAdmin, (req, res) => {
+  const user = (req as AuthenticatedRequest).user as UserRow;
+  const { id } = req.params;
+  db.prepare("DELETE FROM webauthn_credentials WHERE id = ? AND user_id = ?").run(id, user.id);
+  logAction("WEBAUTHN_DELETE_SUCCESS", user.id, user.username, req.ip || "unknown", `Deleted credential ${id}`);
+  res.json({ success: true });
+});
+
+// Authentication Options
+app.post("/api/admin/webauthn/login/options", async (req, res) => {
+  const { username } = req.body;
+  if (!username) return res.status(400).json({ error: "Username required" });
+
+  const user = db.prepare("SELECT * FROM users WHERE username = ?").get(username) as UserRow | undefined;
+  if (!user) return res.status(404).json({ error: "User not found" });
+
+  const userCredentials = db.prepare("SELECT id FROM webauthn_credentials WHERE user_id = ?").all(user.id) as { id: string }[];
+
+  const options = generateAuthenticationOptions({
+    rpID: RP_ID,
+    allowCredentials: userCredentials.map(cred => ({
+      id: cred.id,
+      type: 'public-key',
+    })),
+    userVerification: 'preferred',
+  });
+
+  const challengeId = uuidv4();
+  db.prepare("INSERT INTO webauthn_challenges (id, challenge, user_id, expires_at) VALUES (?, ?, ?, ?)")
+    .run(challengeId, options.challenge, user.id, new Date(Date.now() + 5 * 60 * 1000).toISOString());
+
+  res.cookie('webauthn_challenge_id', challengeId, { httpOnly: true, secure: true, sameSite: 'none', maxAge: 5 * 60 * 1000 });
+  res.json(options);
+});
+
+// Authentication Verification
+app.post("/api/admin/webauthn/login/verify", async (req, res) => {
+  const { body, username } = req.body;
+  const challengeId = req.cookies.webauthn_challenge_id;
+
+  if (!challengeId || !username) return res.status(400).json({ error: "Missing challenge or username" });
+
+  const user = db.prepare("SELECT * FROM users WHERE username = ?").get(username) as UserRow | undefined;
+  if (!user) return res.status(404).json({ error: "User not found" });
+
+  const challengeRow = db.prepare("SELECT * FROM webauthn_challenges WHERE id = ? AND user_id = ?").get(challengeId, user.id) as { challenge: string, expires_at: string } | undefined;
+  
+  if (!challengeRow || new Date(challengeRow.expires_at) < new Date()) {
+    return res.status(400).json({ error: "Invalid or expired challenge" });
+  }
+
+  const dbCredential = db.prepare("SELECT * FROM webauthn_credentials WHERE id = ? AND user_id = ?").get(body.id, user.id) as { public_key: Buffer, counter: number, transports: string } | undefined;
+
+  if (!dbCredential) return res.status(400).json({ error: "Credential not found" });
+
+  try {
+    const verification = await verifyAuthenticationResponse({
+      response: body,
+      expectedChallenge: challengeRow.challenge,
+      expectedOrigin: ORIGIN,
+      expectedRPID: RP_ID,
+      authenticator: {
+        credentialID: isoBase64URL.toUint8Array(body.id),
+        credentialPublicKey: new Uint8Array(dbCredential.public_key),
+        counter: dbCredential.counter,
+      },
+    });
+
+    if (verification.verified) {
+      const { newCounter } = verification.authenticationInfo;
+      db.prepare("UPDATE webauthn_credentials SET counter = ? WHERE id = ?").run(newCounter, body.id);
+      
+      // Clear challenge
+      db.prepare("DELETE FROM webauthn_challenges WHERE id = ?").run(challengeId);
+      res.clearCookie('webauthn_challenge_id');
+
+      // Login success
+      const token = jwt.sign({ userId: user.id, username: user.username }, JWT_SECRET, { expiresIn: '24h' });
+      res.cookie('admin_token', token, { 
+        httpOnly: true, 
+        secure: true,
+        sameSite: 'none',
+        maxAge: 24 * 60 * 60 * 1000 
+      });
+
+      logAction("WEBAUTHN_LOGIN_SUCCESS", user.id, user.username, req.ip || "unknown");
+      res.json({ verified: true, username: user.username });
+    } else {
+      res.status(400).json({ error: "Verification failed" });
+    }
+  } catch (error) {
+    console.error(error);
+    res.status(400).json({ error: "Verification error" });
+  }
+});
+
 /**
  * API ENDPOINTS
  */
@@ -519,6 +777,20 @@ app.get("/api/admin/csrf-token", authenticateAdmin, csrfProtection, (req, res) =
   res.json({ csrfToken: req.csrfToken() });
 });
 
+app.get("/api/admin/me", authenticateAdmin, (req, res) => {
+  const user = (req as AuthenticatedRequest).user as UserRow;
+  const webauthnCreds = db.prepare("SELECT COUNT(*) as count FROM webauthn_credentials WHERE user_id = ?").get(user.id) as { count: number };
+  
+  res.json({
+    id: user.id,
+    username: user.username,
+    isRoot: !!user.is_root,
+    mustChangePassword: !!user.must_change_password,
+    isTotpEnabled: !!user.is_totp_enabled,
+    isWebauthnEnabled: webauthnCreds.count > 0
+  });
+});
+
 /**
  * ADMIN API ROUTES
  */
@@ -530,10 +802,13 @@ app.post("/api/admin/login", authLimiter, async (req, res) => {
     return res.status(400).json({ error: "Username and password required" });
   }
 
-  const user = db.prepare("SELECT * FROM users WHERE username = ?").get(username) as UserRow | undefined;
+  const trimmedPassword = password.trim();
+  const trimmedUsername = username.trim();
+
+  const user = db.prepare("SELECT * FROM users WHERE username = ?").get(trimmedUsername) as UserRow | undefined;
   
   if (!user) {
-    logAction("LOGIN_FAILED", null, username, ip, "User not found");
+    logAction("LOGIN_FAILED", null, trimmedUsername, ip, "User not found");
     return res.status(401).json({ error: "Invalid credentials" });
   }
 
@@ -547,17 +822,17 @@ app.post("/api/admin/login", authLimiter, async (req, res) => {
   const isLegacyHash = user.password_hash.length === 64 && !user.password_hash.startsWith('$2');
 
   if (isLegacyHash) {
-    const legacyHash = crypto.createHash('sha256').update(password).digest('hex');
+    const legacyHash = crypto.createHash('sha256').update(trimmedPassword).digest('hex');
     isPasswordValid = legacyHash === user.password_hash;
     
     if (isPasswordValid) {
       // Migrate to bcrypt
-      const newHash = await bcrypt.hash(password, 12);
+      const newHash = await bcrypt.hash(trimmedPassword, 12);
       db.prepare("UPDATE users SET password_hash = ? WHERE id = ?").run(newHash, user.id);
-      console.log(`[Security] Migrated user ${username} from SHA-256 to bcrypt.`);
+      console.log(`[Security] Migrated user ${trimmedUsername} from SHA-256 to bcrypt.`);
     }
   } else {
-    isPasswordValid = await bcrypt.compare(password, user.password_hash);
+    isPasswordValid = await bcrypt.compare(trimmedPassword, user.password_hash);
   }
 
   if (!isPasswordValid) {
@@ -567,7 +842,7 @@ app.post("/api/admin/login", authLimiter, async (req, res) => {
       lockoutUntil = new Date(Date.now() + 15 * 60 * 1000).toISOString();
     }
     db.prepare("UPDATE users SET failed_attempts = ?, lockout_until = ? WHERE id = ?").run(attempts, lockoutUntil, user.id);
-    logAction("LOGIN_FAILED", user.id, username, ip, `Wrong password. Attempt ${attempts}`);
+    logAction("LOGIN_FAILED", user.id, trimmedUsername, ip, `Wrong password. Attempt ${attempts}`);
     return res.status(401).json({ error: "Invalid credentials" });
   }
 
@@ -576,10 +851,28 @@ app.post("/api/admin/login", authLimiter, async (req, res) => {
     if (!totpToken) {
       return res.status(200).json({ requiresTotp: true });
     }
-    const isValid = authenticator.check(totpToken, user.totp_secret);
+    const trimmedToken = totpToken.trim();
+    let isValid = authenticator.check(trimmedToken, user.totp_secret);
+    
+    // If not valid TOTP, check backup codes
+    if (!isValid && user.backup_codes) {
+      const hashedCodes = JSON.parse(user.backup_codes) as string[];
+      for (let i = 0; i < hashedCodes.length; i++) {
+        const isMatch = await bcrypt.compare(trimmedToken, hashedCodes[i]);
+        if (isMatch) {
+          isValid = true;
+          // Remove used backup code
+          hashedCodes.splice(i, 1);
+          db.prepare("UPDATE users SET backup_codes = ? WHERE id = ?").run(JSON.stringify(hashedCodes), user.id);
+          logAction("BACKUP_CODE_USED", user.id, user.username, ip, `Used backup code. ${hashedCodes.length} remaining.`);
+          break;
+        }
+      }
+    }
+
     if (!isValid) {
-      logAction("LOGIN_FAILED_TOTP", user.id, username, ip, "Invalid TOTP token");
-      return res.status(401).json({ error: "Invalid TOTP token" });
+      logAction("LOGIN_FAILED_TOTP", user.id, username, ip, "Invalid TOTP or backup code");
+      return res.status(401).json({ error: "Invalid TOTP or backup code" });
     }
   }
 
@@ -589,8 +882,8 @@ app.post("/api/admin/login", authLimiter, async (req, res) => {
   const token = jwt.sign({ userId: user.id, username: user.username }, JWT_SECRET, { expiresIn: '24h' });
   res.cookie('admin_token', token, { 
     httpOnly: true, 
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'strict',
+    secure: true, // Required for SameSite=None in iframes
+    sameSite: 'none', // Required for cross-origin iframe (AI Studio preview)
     maxAge: 24 * 60 * 60 * 1000 
   });
 
@@ -609,14 +902,19 @@ app.post("/api/admin/logout", authenticateAdmin, csrfProtection, (req, res) => {
 
 app.post("/api/admin/change-password", authenticateAdmin, csrfProtection, async (req, res) => {
   const { newPassword } = req.body;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const user = (req as any).user as UserRow;
+  const user = (req as AuthenticatedRequest).user as UserRow;
 
-  if (!newPassword || newPassword.length < 8) {
-    return res.status(400).json({ error: "Password must be at least 8 characters long" });
+  if (!newPassword || newPassword.length < 12) {
+    return res.status(400).json({ error: "Password must be at least 12 characters long" });
   }
 
-  const hash = await bcrypt.hash(newPassword, 12);
+  const trimmedPassword = newPassword.trim();
+
+  if (trimmedPassword.length < 12) {
+    return res.status(400).json({ error: "Password must be at least 12 characters long" });
+  }
+
+  const hash = await bcrypt.hash(trimmedPassword, 12);
   db.prepare("UPDATE users SET password_hash = ?, must_change_password = 0 WHERE id = ?").run(hash, user.id);
   
   logAction("PASSWORD_CHANGED", user.id, user.username, req.ip || "unknown");
@@ -630,11 +928,10 @@ app.get("/api/admin/users", authenticateAdmin, (req, res) => {
 
 app.post("/api/admin/users", authenticateAdmin, csrfProtection, async (req, res) => {
   const { username, password } = req.body;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const admin = (req as any).user as UserRow;
+  const admin = (req as AuthenticatedRequest).user as UserRow;
 
-  if (!username || !password || password.length < 8) {
-    return res.status(400).json({ error: "Invalid username or password" });
+  if (!username || !password || password.length < 12) {
+    return res.status(400).json({ error: "Username and password (min 12 chars) required" });
   }
 
   try {
@@ -645,7 +942,6 @@ app.post("/api/admin/users", authenticateAdmin, csrfProtection, async (req, res)
     
     logAction("USER_CREATED", admin.id, admin.username, req.ip || "unknown", `Created user ${username}`);
     res.json({ success: true });
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
   } catch (err) {
     const error = err as Error;
     if (error.message.includes('UNIQUE')) {
@@ -656,8 +952,7 @@ app.post("/api/admin/users", authenticateAdmin, csrfProtection, async (req, res)
 });
 
 app.delete("/api/admin/users/:id", authenticateAdmin, csrfProtection, (req, res) => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const admin = (req as any).user as UserRow;
+  const admin = (req as AuthenticatedRequest).user as UserRow;
   const targetId = req.params.id;
 
   const target = db.prepare("SELECT * FROM users WHERE id = ?").get(targetId) as UserRow | undefined;
@@ -672,45 +967,64 @@ app.delete("/api/admin/users/:id", authenticateAdmin, csrfProtection, (req, res)
   res.json({ success: true });
 });
 
+app.post("/api/admin/users/:id/reset-2fa", authenticateAdmin, csrfProtection, (req, res) => {
+  const admin = (req as AuthenticatedRequest).user as UserRow;
+  const targetId = req.params.id;
+
+  const target = db.prepare("SELECT * FROM users WHERE id = ?").get(targetId) as UserRow | undefined;
+  if (!target) return res.status(404).json({ error: "User not found" });
+
+  db.prepare("UPDATE users SET is_totp_enabled = 0, totp_secret = NULL, backup_codes = NULL WHERE id = ?").run(targetId);
+  logAction("USER_2FA_RESET", admin.id, admin.username, req.ip || "unknown", `Reset 2FA for user ${target.username}`);
+  res.json({ success: true });
+});
+
 app.post("/api/admin/totp/setup", authenticateAdmin, csrfProtection, async (req, res) => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const user = (req as any).user as UserRow;
-  const secret = authenticator.generateSecret();
-  const otpauth = authenticator.keyuri(user.username.trim(), 'SecureShare', secret);
-  
   try {
+    const user = (req as AuthenticatedRequest).user as UserRow;
+    console.log(`[TOTP] Setting up 2FA for user: ${user.username}`);
+    const secret = authenticator.generateSecret();
+    const otpauth = authenticator.toURI({ label: user.username.trim(), issuer: 'SecureShare', secret });
+    
+    console.log(`[TOTP] Generated secret and URI for ${user.username}`);
     const qrCodeUrl = await QRCode.toDataURL(otpauth);
-    // Store secret temporarily in session or just return it for verification
-    // For simplicity, we'll store it in the DB but marked as disabled
+    console.log(`[TOTP] Generated QR Code URL for ${user.username}`);
+    
     db.prepare("UPDATE users SET totp_secret = ?, is_totp_enabled = 0 WHERE id = ?").run(secret, user.id);
+    console.log(`[TOTP] Database updated for ${user.username}`);
+    
     res.json({ qrCodeUrl, secret });
-  } catch {
-    res.status(500).json({ error: "Failed to generate QR code" });
+  } catch (err) {
+    console.error("[TOTP] Failed to setup TOTP:", err);
+    res.status(500).json({ error: "Failed to generate QR code. Check server logs." });
   }
 });
 
-app.post("/api/admin/totp/verify", authenticateAdmin, csrfProtection, (req, res) => {
+app.post("/api/admin/totp/verify", authenticateAdmin, csrfProtection, async (req, res) => {
   const { token } = req.body;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const user = (req as any).user as UserRow;
+  const user = (req as AuthenticatedRequest).user as UserRow;
 
   const dbUser = db.prepare("SELECT totp_secret FROM users WHERE id = ?").get(user.id) as UserRow | undefined;
   if (!dbUser || !dbUser.totp_secret) return res.status(400).json({ error: "TOTP not set up" });
 
-  const isValid = authenticator.check(token, dbUser.totp_secret);
+  const trimmedToken = token.trim();
+  const isValid = authenticator.check(trimmedToken, dbUser.totp_secret);
   if (isValid) {
-    db.prepare("UPDATE users SET is_totp_enabled = 1 WHERE id = ?").run(user.id);
+    // Generate 10 backup codes
+    const codes = Array.from({ length: 10 }, () => crypto.randomBytes(4).toString('hex'));
+    const hashedCodes = await Promise.all(codes.map(c => bcrypt.hash(c, 10)));
+    
+    db.prepare("UPDATE users SET is_totp_enabled = 1, backup_codes = ? WHERE id = ?").run(JSON.stringify(hashedCodes), user.id);
     logAction("TOTP_ENABLED", user.id, user.username, req.ip || "unknown");
-    res.json({ success: true });
+    res.json({ success: true, backupCodes: codes });
   } else {
     res.status(400).json({ error: "Invalid token" });
   }
 });
 
 app.post("/api/admin/totp/disable", authenticateAdmin, csrfProtection, (req, res) => {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const user = (req as any).user as UserRow;
-  db.prepare("UPDATE users SET is_totp_enabled = 0, totp_secret = NULL WHERE id = ?").run(user.id);
+  const user = (req as AuthenticatedRequest).user as UserRow;
+  db.prepare("UPDATE users SET is_totp_enabled = 0, totp_secret = NULL, backup_codes = NULL WHERE id = ?").run(user.id);
   logAction("TOTP_DISABLED", user.id, user.username, req.ip || "unknown");
   res.json({ success: true });
 });
@@ -740,8 +1054,7 @@ app.get("/api/admin/keys", authenticateAdmin, (req, res) => {
 
 app.post("/api/admin/keys", authenticateAdmin, csrfProtection, async (req, res) => {
   const { name } = req.body;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const admin = (req as any).user as UserRow;
+  const admin = (req as AuthenticatedRequest).user as UserRow;
   if (!name) return res.status(400).json({ error: "Name is required" });
 
   const id = crypto.randomBytes(4).toString('hex');
@@ -919,6 +1232,12 @@ setInterval(() => {
  * STATIC FILE SERVING & VITE INTEGRATION
  */
 const startServer = async () => {
+  console.log(`Starting server on port ${PORT}...`);
+  
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`Server is listening on http://0.0.0.0:${PORT}`);
+  });
+
   if (process.env.NODE_ENV === "production") {
     // Production mode: Serve pre-built static files from /dist
     const distPath = path.resolve(process.cwd(), "dist");
@@ -988,14 +1307,10 @@ Policy: https://${req.hostname}/security-policy
 `);
   });
 
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-  });
-
   // Global error handler
   // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars
   app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
-    console.error(err);
+    console.error('Unhandled error:', err);
     res.status(500).send('Internal Server Error');
   });
 };

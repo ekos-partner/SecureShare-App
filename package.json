@@ -7,15 +7,16 @@
     "dev": "tsx server.ts",
     "reset-admin": "tsx scripts/reset-admin.ts",
     "build": "vite build",
-    "reset:admin-password": "tsx scripts/reset-admin-password.ts",
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "eslint .",
     "test": "vitest",
-    "start": "NODE_ENV=production tsx server.ts",
-    "start:prod": "NODE_ENV=production tsx server.ts"
+    "start": "NODE_ENV=production node server.ts",
+    "start:prod": "NODE_ENV=production node server.ts"
   },
   "dependencies": {
+    "@simplewebauthn/browser": "^13.2.2",
+    "@simplewebauthn/server": "^13.2.3",
     "bcrypt": "^6.0.0",
     "better-sqlite3": "^12.4.1",
     "clsx": "^2.1.1",

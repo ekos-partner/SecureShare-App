@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import { startRegistration, startAuthentication } from '@simplewebauthn/browser';
 import { 
   Shield, 
   Key, 
@@ -17,7 +18,9 @@ import {
   FileText,
   Lock,
   Smartphone,
-  UserPlus
+  ShieldOff,
+  UserPlus,
+  Fingerprint
 } from 'lucide-react';
 
 function cn(...classes: (string | boolean | undefined)[]) {
@@ -45,6 +48,7 @@ interface User {
   is_root: boolean;
   must_change_password: boolean;
   is_totp_enabled: boolean;
+  is_webauthn_enabled: boolean;
   created_at: string;
 }
 
@@ -59,11 +63,11 @@ interface AuditLog {
 
 export default function AdminDashboard() {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [totpToken, setTotpToken] = useState('');
   const [requiresTotp, setRequiresTotp] = useState(false);
-  const [mustChangePassword, setMustChangePassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
   const [stats, setStats] = useState<Stats | null>(null);
@@ -86,6 +90,39 @@ export default function AdminDashboard() {
   const [totpVerifyToken, setTotpVerifyToken] = useState('');
   const [newAdminPassword, setNewAdminPassword] = useState('');
   const [passwordChangeSuccess, setPasswordChangeSuccess] = useState(false);
+  const [refreshingLogs, setRefreshingLogs] = useState(false);
+  const [backupCodes, setBackupCodes] = useState<string[] | null>(null);
+  const [webauthnKeys, setWebauthnKeys] = useState<{ id: string, created_at: string }[]>([]);
+  const [isWebauthnSupported, setIsWebauthnSupported] = useState(false);
+
+  // Check session on mount
+  useEffect(() => {
+    setIsWebauthnSupported(window.PublicKeyCredential !== undefined);
+    const checkSession = async () => {
+      try {
+        const res = await fetch('/api/admin/me');
+        if (res.ok) {
+          const data = await res.json();
+          setCurrentUser({
+            id: data.id,
+            username: data.username,
+            is_root: data.isRoot,
+            must_change_password: data.mustChangePassword,
+            is_totp_enabled: data.isTotpEnabled,
+            is_webauthn_enabled: data.isWebauthnEnabled,
+            created_at: '' // Not needed for current user state
+          });
+          setIsLoggedIn(true);
+          if (data.mustChangePassword) {
+            setActiveTab('security');
+          }
+        }
+      } catch (err) {
+        console.error('Session check failed:', err);
+      }
+    };
+    checkSession();
+  }, []);
 
   useEffect(() => {
     if (isLoggedIn) {
@@ -94,9 +131,117 @@ export default function AdminDashboard() {
         fetchKeys();
         fetchUsers();
         fetchLogs();
+        fetchWebauthnKeys();
       });
     }
   }, [isLoggedIn]);
+
+  const fetchWebauthnKeys = async () => {
+    try {
+      const res = await fetch('/api/admin/webauthn/credentials');
+      if (res.ok) {
+        const data = await res.json();
+        setWebauthnKeys(data);
+      }
+    } catch (err) {
+      console.error('Failed to fetch WebAuthn keys:', err);
+    }
+  };
+
+  const handleRegisterWebauthn = async () => {
+    setError('');
+    setLoading(true);
+    try {
+      const optionsRes = await fetch('/api/admin/webauthn/register/options', {
+        method: 'POST',
+        headers: { 'X-CSRF-Token': csrfToken }
+      });
+      if (!optionsRes.ok) throw new Error('Failed to get registration options');
+      const options = await optionsRes.json();
+
+      const attestation = await startRegistration({ optionsJSON: options });
+
+      const verifyRes = await fetch('/api/admin/webauthn/register/verify', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken
+        },
+        body: JSON.stringify(attestation)
+      });
+
+      if (verifyRes.ok) {
+        fetchWebauthnKeys();
+        fetchLogs();
+      } else {
+        const data = await verifyRes.json();
+        setError(data.error || 'Registration failed');
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'WebAuthn registration failed';
+      setError(message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteWebauthnKey = async (id: string) => {
+    if (!confirm('Are you sure you want to delete this security key?')) return;
+    try {
+      const res = await fetch(`/api/admin/webauthn/credentials/${id}`, {
+        method: 'DELETE',
+        headers: { 'X-CSRF-Token': csrfToken }
+      });
+      if (res.ok) {
+        fetchWebauthnKeys();
+        fetchLogs();
+      }
+    } catch {
+      setError('Failed to delete security key');
+    }
+  };
+
+  const handleWebauthnLogin = async () => {
+    if (!username) {
+      setError('Please enter your username first');
+      return;
+    }
+    setError('');
+    setLoading(true);
+    try {
+      const optionsRes = await fetch('/api/admin/webauthn/login/options', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username })
+      });
+      if (!optionsRes.ok) {
+        const data = await optionsRes.json();
+        throw new Error(data.error || 'Failed to get login options');
+      }
+      const options = await optionsRes.json();
+
+      const assertion = await startAuthentication({ optionsJSON: options });
+
+      const verifyRes = await fetch('/api/admin/webauthn/login/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ body: assertion, username })
+      });
+
+      if (verifyRes.ok) {
+        // Trigger session check to log in
+        window.location.reload();
+      } else {
+        const data = await verifyRes.json();
+        setError(data.error || 'Login verification failed');
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'WebAuthn login failed';
+      setError(message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const fetchCsrfToken = async () => {
     try {
@@ -134,8 +279,15 @@ export default function AdminDashboard() {
         if (data.requiresTotp) {
           setRequiresTotp(true);
         } else {
+          setCurrentUser({
+            id: data.id,
+            username: data.username,
+            is_root: data.isRoot,
+            must_change_password: data.mustChangePassword,
+            is_totp_enabled: data.isTotpEnabled,
+            created_at: ''
+          });
           setIsLoggedIn(true);
-          setMustChangePassword(data.mustChangePassword);
           if (data.mustChangePassword) {
             setActiveTab('security');
           }
@@ -156,6 +308,7 @@ export default function AdminDashboard() {
       headers: { 'X-CSRF-Token': csrfToken }
     });
     setIsLoggedIn(false);
+    setCurrentUser(null);
     setCsrfToken('');
     setRequiresTotp(false);
     setTotpToken('');
@@ -186,8 +339,13 @@ export default function AdminDashboard() {
   };
 
   const fetchLogs = async () => {
-    const res = await fetch('/api/admin/logs');
-    if (res.ok) setLogs(await res.json());
+    setRefreshingLogs(true);
+    try {
+      const res = await fetch('/api/admin/logs');
+      if (res.ok) setLogs(await res.json());
+    } finally {
+      setTimeout(() => setRefreshingLogs(false), 500);
+    }
   };
 
   const handleCreateUser = async (e: React.FormEvent) => {
@@ -230,54 +388,107 @@ export default function AdminDashboard() {
     }
   };
 
-  const handleSetupTotp = async () => {
-    setError('');
-    try {
-      const res = await fetch('/api/admin/totp/setup', { 
-        method: 'POST',
-        headers: { 'X-CSRF-Token': csrfToken }
-      });
-      if (res.ok) {
-        setTotpSetupData(await res.json());
-      } else {
-        const data = await res.json();
-        setError(data.error || 'Failed to setup 2FA');
-      }
-    } catch (err) {
-      setError('Connection error or server unreachable');
-      console.error('2FA setup error:', err);
-    }
-  };
-
-  const handleVerifyTotp = async () => {
-    const res = await fetch('/api/admin/totp/verify', {
-      method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json',
-        'X-CSRF-Token': csrfToken
-      },
-      body: JSON.stringify({ token: totpVerifyToken })
-    });
-    if (res.ok) {
-      setTotpSetupData(null);
-      setTotpVerifyToken('');
-      fetchUsers(); // Refresh to show 2FA enabled
-      fetchLogs();
-    } else {
-      const data = await res.json();
-      setError(data.error);
-    }
-  };
-
-  const handleDisableTotp = async () => {
-    if (!confirm('Are you sure you want to disable 2FA?')) return;
-    const res = await fetch('/api/admin/totp/disable', { 
+  const handleResetUserTotp = async (id: string, username: string) => {
+    if (!confirm(`Are you sure you want to reset 2FA for user ${username}?`)) return;
+    const res = await fetch(`/api/admin/users/${id}/reset-2fa`, { 
       method: 'POST',
       headers: { 'X-CSRF-Token': csrfToken }
     });
     if (res.ok) {
       fetchUsers();
       fetchLogs();
+    } else {
+      const data = await res.json();
+      alert(data.error);
+    }
+  };
+
+  const handleSetupTotp = async () => {
+    setError('');
+    setLoading(true);
+    try {
+      const res = await fetch('/api/admin/totp/setup', { 
+        method: 'POST',
+        headers: { 'X-CSRF-Token': csrfToken }
+      });
+      
+      const contentType = res.headers.get("content-type");
+      if (contentType && contentType.indexOf("application/json") !== -1) {
+        const data = await res.json();
+        if (res.ok) {
+          setTotpSetupData(data);
+        } else {
+          setError(data.error || 'Failed to setup 2FA');
+        }
+      } else {
+        const text = await res.text();
+        console.error('Non-JSON response:', text);
+        setError('Server returned an invalid response. Check console for details.');
+      }
+    } catch (err) {
+      setError('Connection error or server unreachable');
+      console.error('2FA setup error:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleVerifyTotp = async () => {
+    setError('');
+    try {
+      const res = await fetch('/api/admin/totp/verify', {
+        method: 'POST',
+        headers: { 
+          'Content-Type': 'application/json',
+          'X-CSRF-Token': csrfToken
+        },
+        body: JSON.stringify({ token: totpVerifyToken })
+      });
+      
+      const contentType = res.headers.get("content-type");
+      if (contentType && contentType.indexOf("application/json") !== -1) {
+        const data = await res.json();
+        if (res.ok) {
+          setBackupCodes(data.backupCodes);
+          setTotpSetupData(null);
+          setTotpVerifyToken('');
+          if (currentUser) {
+            setCurrentUser({ ...currentUser, is_totp_enabled: true });
+          }
+          fetchUsers(); // Refresh to show 2FA enabled
+          fetchLogs();
+        } else {
+          setError(data.error || 'Verification failed');
+        }
+      } else {
+        setError('Server returned an invalid response during verification.');
+      }
+    } catch (err) {
+      setError('Connection error during verification.');
+      console.error(err);
+    }
+  };
+
+  const handleDisableTotp = async () => {
+    if (!confirm('Are you sure you want to disable 2FA?')) return;
+    setError('');
+    try {
+      const res = await fetch('/api/admin/totp/disable', { 
+        method: 'POST',
+        headers: { 'X-CSRF-Token': csrfToken }
+      });
+      if (res.ok) {
+        if (currentUser) {
+          setCurrentUser({ ...currentUser, is_totp_enabled: false });
+        }
+        fetchUsers();
+        fetchLogs();
+      } else {
+        setError('Failed to disable 2FA.');
+      }
+    } catch (err) {
+      setError('Connection error.');
+      console.error(err);
     }
   };
 
@@ -333,6 +544,9 @@ export default function AdminDashboard() {
       if (res.ok) {
         setPasswordChangeSuccess(true);
         setNewAdminPassword('');
+        if (currentUser) {
+          setCurrentUser({ ...currentUser, must_change_password: false });
+        }
       } else {
         const data = await res.json();
         setError(data.error || 'Failed to change password');
@@ -429,10 +643,26 @@ export default function AdminDashboard() {
             >
               {loading ? 'Authenticating...' : 'Login to Dashboard'}
             </button>
+
+            <div className="relative flex items-center py-4">
+              <div className="flex-grow border-t border-slate-800"></div>
+              <span className="flex-shrink mx-4 text-slate-500 text-xs font-bold uppercase tracking-widest">OR</span>
+              <div className="flex-grow border-t border-slate-800"></div>
+            </div>
+
+            <button 
+              type="button"
+              onClick={handleWebauthnLogin}
+              disabled={loading || !isWebauthnSupported}
+              className="w-full py-4 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-2xl transition-all border border-slate-800 flex items-center justify-center gap-2 disabled:opacity-50"
+            >
+              <Fingerprint className="w-5 h-5 text-indigo-400" />
+              {isWebauthnSupported ? 'Login with Security Key' : 'Security Key Not Supported'}
+            </button>
           </form>
           
           <p className="mt-6 text-center text-xs text-slate-500">
-            SecureShare v1.1.0 Admin Panel
+            SecureShare Admin Panel
           </p>
         </motion.div>
       </div>
@@ -460,13 +690,54 @@ export default function AdminDashboard() {
           </button>
         </header>
 
+        {error && (
+          <div className="mb-8 p-4 bg-red-900/20 border border-red-900/30 rounded-xl flex items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <AlertCircle className="w-5 h-5 text-red-400 shrink-0" />
+              <p className="text-sm text-red-400 font-medium">{error}</p>
+            </div>
+            <button onClick={() => setError('')} className="text-red-400 hover:text-red-300">
+              <Trash2 className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
         {/* Tabs Navigation */}
         <div className="flex gap-2 mb-8 border-b border-slate-800 pb-4 overflow-x-auto no-scrollbar">
-          <TabButton active={activeTab === 'stats'} onClick={() => setActiveTab('stats')} icon={<BarChart3 className="w-4 h-4" />} label="Overview" />
-          <TabButton active={activeTab === 'keys'} onClick={() => setActiveTab('keys')} icon={<Key className="w-4 h-4" />} label="API Keys" />
-          <TabButton active={activeTab === 'users'} onClick={() => setActiveTab('users')} icon={<Users className="w-4 h-4" />} label="Users" />
-          <TabButton active={activeTab === 'logs'} onClick={() => setActiveTab('logs')} icon={<FileText className="w-4 h-4" />} label="Audit Logs" />
-          <TabButton active={activeTab === 'security'} onClick={() => setActiveTab('security')} icon={<Lock className="w-4 h-4" />} label="Security" />
+          <TabButton 
+            active={activeTab === 'stats'} 
+            onClick={() => setActiveTab('stats')} 
+            icon={<BarChart3 className="w-4 h-4" />} 
+            label="Overview" 
+            disabled={!!currentUser?.must_change_password}
+          />
+          <TabButton 
+            active={activeTab === 'keys'} 
+            onClick={() => setActiveTab('keys')} 
+            icon={<Key className="w-4 h-4" />} 
+            label="API Keys" 
+            disabled={!!currentUser?.must_change_password}
+          />
+          <TabButton 
+            active={activeTab === 'users'} 
+            onClick={() => setActiveTab('users')} 
+            icon={<Users className="w-4 h-4" />} 
+            label="Users" 
+            disabled={!!currentUser?.must_change_password}
+          />
+          <TabButton 
+            active={activeTab === 'logs'} 
+            onClick={() => setActiveTab('logs')} 
+            icon={<FileText className="w-4 h-4" />} 
+            label="Audit Logs" 
+            disabled={!!currentUser?.must_change_password}
+          />
+          <TabButton 
+            active={activeTab === 'security'} 
+            onClick={() => setActiveTab('security')} 
+            icon={<Lock className="w-4 h-4" />} 
+            label="Security" 
+          />
         </div>
 
         <AnimatePresence mode="wait">
@@ -687,14 +958,26 @@ export default function AdminDashboard() {
                               )}
                             </td>
                             <td className="px-6 py-4 text-right">
-                              {!u.is_root && (
-                                <button 
-                                  onClick={() => handleDeleteUser(u.id)}
-                                  className="p-2 text-slate-500 hover:text-red-400 transition-colors"
-                                >
-                                  <Trash2 className="w-5 h-5" />
-                                </button>
-                              )}
+                              <div className="flex items-center justify-end gap-2">
+                                {u.is_totp_enabled && (
+                                  <button 
+                                    onClick={() => handleResetUserTotp(u.id, u.username)}
+                                    title="Reset 2FA"
+                                    className="p-2 text-slate-500 hover:text-indigo-400 transition-colors"
+                                  >
+                                    <ShieldOff className="w-5 h-5" />
+                                  </button>
+                                )}
+                                {!u.is_root && (
+                                  <button 
+                                    onClick={() => handleDeleteUser(u.id)}
+                                    title="Delete User"
+                                    className="p-2 text-slate-500 hover:text-red-400 transition-colors"
+                                  >
+                                    <Trash2 className="w-5 h-5" />
+                                  </button>
+                                )}
+                              </div>
                             </td>
                           </tr>
                         ))}
@@ -730,7 +1013,7 @@ export default function AdminDashboard() {
                         className="w-full p-3.5 rounded-2xl border border-slate-800 bg-slate-900/50 text-white focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 transition-all"
                         placeholder="••••••••"
                         required
-                        minLength={8}
+                        minLength={12}
                       />
                       <p className="mt-2 text-[10px] text-slate-500 italic">User will be forced to change this password on first login.</p>
                     </div>
@@ -758,7 +1041,13 @@ export default function AdminDashboard() {
                   <h2 className="text-xl font-bold text-white flex items-center gap-2">
                     <FileText className="w-5 h-5 text-indigo-400" /> Audit Logs
                   </h2>
-                  <button onClick={fetchLogs} className="text-xs font-bold text-indigo-400 hover:text-indigo-300">Refresh</button>
+                  <button 
+                    onClick={fetchLogs} 
+                    disabled={refreshingLogs}
+                    className="text-xs font-bold text-indigo-400 hover:text-indigo-300 disabled:opacity-50 transition-all"
+                  >
+                    {refreshingLogs ? 'Refreshing...' : 'Refresh'}
+                  </button>
                 </div>
                 <div className="overflow-x-auto">
                   <table className="w-full text-left">
@@ -814,7 +1103,7 @@ export default function AdminDashboard() {
                 </h2>
                 <p className="text-slate-400 mb-8 font-medium">Update your administrative password.</p>
 
-                {mustChangePassword && (
+                {currentUser?.must_change_password && (
                   <div className="mb-6 p-4 bg-amber-900/20 border border-amber-900/30 rounded-xl flex items-center gap-3">
                     <AlertCircle className="w-5 h-5 text-amber-400 shrink-0" />
                     <p className="text-sm text-amber-400 font-bold">Security Action Required: Please change your initial password.</p>
@@ -829,9 +1118,9 @@ export default function AdminDashboard() {
                       value={newAdminPassword}
                       onChange={(e) => setNewAdminPassword(e.target.value)}
                       className="w-full p-4 rounded-2xl border border-slate-800 bg-slate-900/50 text-white focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 transition-all"
-                      placeholder="At least 8 characters..."
+                      placeholder="At least 12 characters..."
                       required
-                      minLength={8}
+                      minLength={12}
                     />
                   </div>
 
@@ -869,7 +1158,7 @@ export default function AdminDashboard() {
                 </h2>
                 <p className="text-slate-400 mb-8 font-medium">Add an extra layer of security to your account.</p>
 
-                {users.find(u => u.username === username)?.is_totp_enabled ? (
+                {currentUser?.is_totp_enabled ? (
                   <div className="space-y-6">
                     <div className="p-6 bg-emerald-900/10 border border-emerald-900/20 rounded-2xl flex items-center gap-4">
                       <div className="p-3 bg-emerald-600 rounded-xl">
@@ -889,12 +1178,37 @@ export default function AdminDashboard() {
                   </div>
                 ) : (
                   <div className="space-y-6">
-                    {!totpSetupData ? (
+                    {backupCodes ? (
+                      <div className="space-y-6">
+                        <div className="p-6 bg-indigo-900/20 border border-indigo-500/30 rounded-2xl">
+                          <h4 className="text-lg font-bold text-white mb-2 flex items-center gap-2">
+                            <Shield className="w-5 h-5 text-indigo-400" /> Backup Recovery Codes
+                          </h4>
+                          <p className="text-sm text-slate-400 mb-4">
+                            Save these codes in a secure place. Each code can be used only once to log in if you lose your 2FA device.
+                          </p>
+                          <div className="grid grid-cols-2 gap-2 font-mono text-sm">
+                            {backupCodes.map(code => (
+                              <div key={code} className="p-2 bg-slate-900 rounded-lg text-indigo-400 text-center border border-slate-800">
+                                {code}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                        <button 
+                          onClick={() => setBackupCodes(null)}
+                          className="w-full py-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-2xl transition-all"
+                        >
+                          I've Saved the Codes
+                        </button>
+                      </div>
+                    ) : !totpSetupData ? (
                       <button 
                         onClick={handleSetupTotp}
-                        className="w-full py-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-2xl transition-all shadow-lg shadow-indigo-900/20"
+                        disabled={loading}
+                        className="w-full py-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-2xl transition-all shadow-lg shadow-indigo-900/20 disabled:opacity-50"
                       >
-                        Enable 2FA
+                        {loading ? 'Generating...' : 'Enable 2FA'}
                       </button>
                     ) : (
                       <div className="space-y-6">
@@ -905,6 +1219,20 @@ export default function AdminDashboard() {
                           <p className="text-sm text-slate-400 text-center">
                             Scan this QR code with Google Authenticator or Microsoft Authenticator, then enter the 6-digit code below.
                           </p>
+                          
+                          <div className="p-4 bg-slate-900/50 rounded-2xl border border-slate-800">
+                            <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-2 text-center">Manual Entry Key</p>
+                            <div className="flex items-center justify-between gap-3">
+                              <code className="text-indigo-400 font-mono text-sm break-all">{totpSetupData.secret}</code>
+                              <button 
+                                onClick={() => copyToClipboard(totpSetupData.secret)}
+                                className="p-2 hover:bg-slate-800 rounded-lg text-slate-400 transition-colors shrink-0"
+                              >
+                                {copied ? <Check className="w-4 h-4 text-emerald-500" /> : <Copy className="w-4 h-4" />}
+                              </button>
+                            </div>
+                          </div>
+
                           <input 
                             type="text" 
                             value={totpVerifyToken}
@@ -944,6 +1272,71 @@ export default function AdminDashboard() {
                   </p>
                 </div>
               </div>
+
+              {/* WebAuthn Management */}
+              <div className="glass rounded-[2rem] p-8 border border-slate-800 lg:col-span-2">
+                <h2 className="text-2xl font-bold text-white mb-2 flex items-center gap-3">
+                  <Fingerprint className="w-6 h-6 text-indigo-400" /> Security Keys (WebAuthn)
+                </h2>
+                <p className="text-slate-400 mb-8 font-medium">Use a hardware security key (like YubiKey) for passwordless login.</p>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                  <div className="space-y-6">
+                    <h3 className="text-white font-bold flex items-center gap-2">
+                      <Shield className="w-4 h-4 text-indigo-400" /> Registered Keys
+                    </h3>
+                    <div className="space-y-3">
+                      {webauthnKeys.length === 0 ? (
+                        <div className="p-6 bg-slate-900/50 border border-slate-800 rounded-2xl text-center">
+                          <p className="text-sm text-slate-500 italic">No security keys registered.</p>
+                        </div>
+                      ) : (
+                        webauthnKeys.map(key => (
+                          <div key={key.id} className="p-4 bg-slate-900/50 border border-slate-800 rounded-2xl flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <div className="p-2 bg-indigo-900/20 rounded-lg">
+                                <Fingerprint className="w-4 h-4 text-indigo-400" />
+                              </div>
+                              <div>
+                                <p className="text-sm font-bold text-white truncate max-w-[150px]">{key.id}</p>
+                                <p className="text-[10px] text-slate-500">Added: {new Date(key.created_at).toLocaleDateString()}</p>
+                              </div>
+                            </div>
+                            <button 
+                              onClick={() => handleDeleteWebauthnKey(key.id)}
+                              className="p-2 text-slate-500 hover:text-red-400 transition-colors"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="space-y-6">
+                    <h3 className="text-white font-bold flex items-center gap-2">
+                      <Plus className="w-4 h-4 text-indigo-400" /> Add New Key
+                    </h3>
+                    <div className="p-6 bg-slate-900/50 border border-slate-800 rounded-2xl space-y-4">
+                      <p className="text-xs text-slate-400 leading-relaxed">
+                        Security keys provide the strongest protection against phishing and unauthorized access.
+                      </p>
+                      <button 
+                        onClick={handleRegisterWebauthn}
+                        disabled={loading || !isWebauthnSupported}
+                        className="w-full py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl transition-all disabled:opacity-50 flex items-center justify-center gap-2"
+                      >
+                        <Fingerprint className="w-4 h-4" />
+                        {isWebauthnSupported ? 'Register New Key' : 'Not Supported'}
+                      </button>
+                      {!isWebauthnSupported && (
+                        <p className="text-[10px] text-red-400 text-center">Your browser does not support WebAuthn.</p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              </div>
             </motion.div>
           )}
         </AnimatePresence>
@@ -952,15 +1345,18 @@ export default function AdminDashboard() {
   );
 }
 
-function TabButton({ active, onClick, icon, label }: { active: boolean, onClick: () => void, icon: React.ReactNode, label: string }) {
+function TabButton({ active, onClick, icon, label, disabled }: { active: boolean, onClick: () => void, icon: React.ReactNode, label: string, disabled?: boolean }) {
   return (
     <button
       onClick={onClick}
+      disabled={disabled}
       className={cn(
         "flex items-center gap-2 px-4 py-2 rounded-xl transition-all font-bold text-sm",
         active 
           ? "bg-indigo-600 text-white shadow-lg shadow-indigo-900/20" 
-          : "text-slate-500 hover:text-slate-300 hover:bg-slate-900"
+          : disabled
+            ? "text-slate-700 cursor-not-allowed opacity-50"
+            : "text-slate-500 hover:text-slate-300 hover:bg-slate-900"
       )}
     >
       {icon}

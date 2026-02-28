@@ -10,6 +10,7 @@ The dashboard is accessible at the `/admin` route of your deployment.
 - **Default Credentials**: 
     - **Username**: `admin`
     - **Password**: (Set via `ADMIN_PASSWORD` environment variable or the `reset-admin` CLI tool)
+- **Password Policy**: Minimum **12 characters**.
 
 ### First Login & Security
 On your first login, the system will require you to change your initial password. We strongly recommend enabling **Two-Factor Authentication (2FA)** immediately after.
@@ -23,19 +24,26 @@ SecureShare supports multiple administrative accounts to ensure accountability a
 - **Root Administrator**: The primary account (`admin`). It cannot be deleted.
 - **Standard Administrators**: Accounts created by other admins. They have full access to the dashboard but can be managed/deleted by others.
 - **Password Resets**: Admins can be forced to change their passwords on their next login.
+- **Password Strength**: All passwords must be at least **12 characters** long.
 
 ---
 
-## 🔐 Two-Factor Authentication (TOTP)
+## 🔐 Two-Factor Authentication (TOTP) & Recovery
 
 Protect your administrative accounts with industry-standard TOTP (Time-based One-Time Password).
 
+### Setup
 1. Go to the **Security** tab in the Dashboard.
 2. Click **Enable 2FA**.
 3. Scan the QR code with an app like **Google Authenticator**, **Microsoft Authenticator**, or **Authy**.
 4. Enter the 6-digit verification code to activate.
+5. **IMPORTANT**: Save the **Backup Recovery Codes** displayed after activation.
 
-*Note: If an admin loses their 2FA device, the `reset-admin` CLI tool can be used by someone with server access to reset the account.*
+### Recovery Codes
+If you lose access to your TOTP device, you can use one of your 10 backup codes in the 2FA field during login. Each code can only be used **once**.
+
+### Emergency Reset
+If an admin loses both their device and their backup codes, the `reset-admin` CLI tool can be used by someone with server access to reset the account and disable 2FA.
 
 ---
 

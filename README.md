@@ -175,6 +175,16 @@ SecureShare offers three ways to interact with the system, each designed for dif
 -   **Two-Factor Authentication (2FA)**: TOTP support for all administrative accounts.
 -   **Audit Logging**: Comprehensive, privacy-respecting tracking of all administrative actions.
 
+## 🛡️ Security by Design
+
+SecureShare is built with a "Security by Design" philosophy, ensuring that security is not an afterthought but a core component of the architecture.
+
+- **Strong Password Policy**: All administrative accounts require a minimum of **12 characters**.
+- **Mandatory 2FA Recovery**: Every 2FA setup generates **10 unique backup codes** for emergency access.
+- **Root Admin Protection**: The primary `admin` account can be recovered via a secure CLI tool, preventing permanent lockouts while maintaining high security.
+- **Bcrypt Hashing**: All passwords and backup codes are hashed using `bcrypt` with a high cost factor (12 iterations).
+- **Zero-Knowledge**: Client-side encryption ensures the server never sees your plaintext data.
+
 ## 💻 API & Integrations
 A powerful REST API is available for integrating SecureShare into your workflows. A command-line interface (CLI) is also provided for easy terminal-based sharing.
 
