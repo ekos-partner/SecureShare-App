@@ -823,15 +823,12 @@ app.post("/api/admin/login", authLimiter, async (req, res) => {
   const isLegacyHash = user.password_hash.length === 64 && !user.password_hash.startsWith('$2');
 
   if (isLegacyHash) {
-    const legacyHash = crypto.createHash('sha256').update(trimmedPassword).digest('hex');
-    isPasswordValid = legacyHash === user.password_hash;
-    
-    if (isPasswordValid) {
-      // Migrate to bcrypt
-      const newHash = await bcrypt.hash(trimmedPassword, 12);
-      db.prepare("UPDATE users SET password_hash = ? WHERE id = ?").run(newHash, user.id);
-      console.log(`[Security] Migrated user ${trimmedUsername} from SHA-256 to bcrypt.`);
-    }
+    // Legacy SHA-256-based password hashes are no longer accepted to avoid using
+    // a fast, insecure hashing scheme on user-supplied passwords. Force a safer
+    // migration path (for example, via a password reset flow) instead of
+    // recomputing the legacy hash here.
+    logAction("LOGIN_FAILED_LEGACY_HASH", user.id, trimmedUsername, ip, "Legacy password hash requires reset");
+    return res.status(403).json({ error: "Password reset required for this account." });
   } else {
     isPasswordValid = await bcrypt.compare(trimmedPassword, user.password_hash);
   }
