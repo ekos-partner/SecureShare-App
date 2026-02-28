@@ -24,9 +24,12 @@ import cors from "cors";
 import { z } from "zod";
 import crypto from 'node:crypto';
 import ejs from 'ejs';
-import jwt from 'jsonwebtoken';
 import cookieParser from 'cookie-parser';
-import { authenticator } from 'otplib';
+import { createRequire } from 'module';
+const require = createRequire(import.meta.url);
+const jwt = require('jsonwebtoken');
+const otplib = require('otplib');
+const authenticator = otplib.authenticator || otplib;
 
 // Configure authenticator options
 authenticator.options = { 
@@ -34,9 +37,9 @@ authenticator.options = {
 };
 console.log("2FA Authenticator initialized successfully.");
 
-import QRCode from 'qrcode';
-import bcrypt from 'bcrypt';
-import csrf from 'csurf';
+const QRCode = require('qrcode');
+const bcrypt = require('bcrypt');
+const csrf = require('csurf');
 
 /**
  * DATABASE INITIALIZATION
