@@ -26,32 +26,15 @@ import crypto from 'node:crypto';
 import ejs from 'ejs';
 import jwt from 'jsonwebtoken';
 import cookieParser from 'cookie-parser';
-import { createRequire } from 'module';
-const require = createRequire(import.meta.url);
-const csrf = require('csurf');
+import { authenticator } from 'otplib';
 
-// Bulletproof otplib authenticator extraction
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let authenticator: any;
-try {
-  const otplibPkg = require('otplib');
-  // Try different common export patterns for otplib
-  authenticator = otplibPkg.authenticator || 
-                  (otplibPkg.default && otplibPkg.default.authenticator) || 
-                  otplibPkg;
-  
-  if (authenticator && typeof authenticator === 'object') {
-    authenticator.options = { 
-      window: [1, 1] // Allow for slight time drift (1 step = 30s before and after)
-    };
-    console.log("2FA Authenticator initialized successfully.");
-  } else {
-    console.error("CRITICAL: Could not find authenticator in otplib package structure.");
-  }
-} catch (err) {
-  console.error("FAILED to load otplib:", err);
-}
-import * as QRCode from 'qrcode';
+// Configure authenticator options
+authenticator.options = { 
+  window: [1, 1] // Allow for slight time drift (1 step = 30s before and after)
+};
+console.log("2FA Authenticator initialized successfully.");
+
+import QRCode from 'qrcode';
 import bcrypt from 'bcrypt';
 import csrf from 'csurf';
 
@@ -572,7 +555,7 @@ const ORIGIN = process.env.APP_URL || `http://${RP_ID}:3000`;
  */
 
 // Registration Options
-app.post("/api/admin/webauthn/register/options", csrfProtection, authenticateAdmin, (req, res) => {
+app.post("/api/admin/webauthn/register/options", authenticateAdmin, (req, res) => {
   const user = (req as AuthenticatedRequest).user as UserRow;
   
   const userCredentials = db.prepare("SELECT id FROM webauthn_credentials WHERE user_id = ?").all(user.id) as { id: string }[];
@@ -603,7 +586,7 @@ app.post("/api/admin/webauthn/register/options", csrfProtection, authenticateAdm
 });
 
 // Registration Verification
-app.post("/api/admin/webauthn/register/verify", csrfProtection, authenticateAdmin, async (req, res) => {
+app.post("/api/admin/webauthn/register/verify", authenticateAdmin, async (req, res) => {
   const user = (req as AuthenticatedRequest).user as UserRow;
   const { body } = req;
   const challengeId = req.cookies.webauthn_challenge_id;
@@ -651,14 +634,14 @@ app.post("/api/admin/webauthn/register/verify", csrfProtection, authenticateAdmi
 });
 
 // Get WebAuthn Credentials
-app.get("/api/admin/webauthn/credentials", csrfProtection, authenticateAdmin, (req, res) => {
+app.get("/api/admin/webauthn/credentials", authenticateAdmin, (req, res) => {
   const user = (req as AuthenticatedRequest).user as UserRow;
   const credentials = db.prepare("SELECT id, created_at FROM webauthn_credentials WHERE user_id = ?").all(user.id);
   res.json(credentials);
 });
 
 // Delete WebAuthn Credential
-app.delete("/api/admin/webauthn/credentials/:id", csrfProtection, authenticateAdmin, (req, res) => {
+app.delete("/api/admin/webauthn/credentials/:id", authenticateAdmin, (req, res) => {
   const user = (req as AuthenticatedRequest).user as UserRow;
   const { id } = req.params;
   db.prepare("DELETE FROM webauthn_credentials WHERE id = ? AND user_id = ?").run(id, user.id);
@@ -667,7 +650,7 @@ app.delete("/api/admin/webauthn/credentials/:id", csrfProtection, authenticateAd
 });
 
 // Authentication Options
-app.post("/api/admin/webauthn/login/options", csrfProtection, async (req, res) => {
+app.post("/api/admin/webauthn/login/options", async (req, res) => {
   const { username } = req.body;
   if (!username) return res.status(400).json({ error: "Username required" });
 
@@ -694,7 +677,7 @@ app.post("/api/admin/webauthn/login/options", csrfProtection, async (req, res) =
 });
 
 // Authentication Verification
-app.post("/api/admin/webauthn/login/verify", csrfProtection, async (req, res) => {
+app.post("/api/admin/webauthn/login/verify", async (req, res) => {
   const { body, username } = req.body;
   const challengeId = req.cookies.webauthn_challenge_id;
 
@@ -981,12 +964,19 @@ app.post("/api/admin/totp/setup", authenticateAdmin, async (req, res) => {
   try {
     const user = (req as AuthenticatedRequest).user as UserRow;
     console.log(`[TOTP] Setting up 2FA for user: ${user.username}`);
-    const secret = authenticator.generateSecret();
-    const otpauth = authenticator.toURI({ label: user.username.trim(), issuer: 'SecureShare', secret });
     
-    console.log(`[TOTP] Generated secret and URI for ${user.username}`);
+    if (!authenticator) {
+      throw new Error("Authenticator not initialized");
+    }
+
+    const secret = authenticator.generateSecret();
+    console.log(`[TOTP] Secret generated`);
+    
+    const otpauth = authenticator.keyuri(user.username.trim(), 'SecureShare', secret);
+    console.log(`[TOTP] KeyURI generated: ${otpauth.substring(0, 20)}...`);
+    
     const qrCodeUrl = await QRCode.toDataURL(otpauth);
-    console.log(`[TOTP] Generated QR Code URL for ${user.username}`);
+    console.log(`[TOTP] QR Code URL generated`);
     
     db.prepare("UPDATE users SET totp_secret = ?, is_totp_enabled = 0 WHERE id = ?").run(secret, user.id);
     console.log(`[TOTP] Database updated for ${user.username}`);
@@ -994,7 +984,8 @@ app.post("/api/admin/totp/setup", authenticateAdmin, async (req, res) => {
     res.json({ qrCodeUrl, secret });
   } catch (err) {
     console.error("[TOTP] Failed to setup TOTP:", err);
-    res.status(500).json({ error: "Failed to generate QR code. Check server logs." });
+    const message = err instanceof Error ? err.message : "Unknown error";
+    res.status(500).json({ error: `Failed to generate QR code: ${message}. Check server logs.` });
   }
 });
 
