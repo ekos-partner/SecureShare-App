@@ -28,6 +28,7 @@ import jwt from 'jsonwebtoken';
 import cookieParser from 'cookie-parser';
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
+const csrf = require('csurf');
 
 // Bulletproof otplib authenticator extraction
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -571,7 +572,7 @@ const ORIGIN = process.env.APP_URL || `http://${RP_ID}:3000`;
  */
 
 // Registration Options
-app.post("/api/admin/webauthn/register/options", authenticateAdmin, (req, res) => {
+app.post("/api/admin/webauthn/register/options", csrfProtection, authenticateAdmin, (req, res) => {
   const user = (req as AuthenticatedRequest).user as UserRow;
   
   const userCredentials = db.prepare("SELECT id FROM webauthn_credentials WHERE user_id = ?").all(user.id) as { id: string }[];
@@ -602,7 +603,7 @@ app.post("/api/admin/webauthn/register/options", authenticateAdmin, (req, res) =
 });
 
 // Registration Verification
-app.post("/api/admin/webauthn/register/verify", authenticateAdmin, async (req, res) => {
+app.post("/api/admin/webauthn/register/verify", csrfProtection, authenticateAdmin, async (req, res) => {
   const user = (req as AuthenticatedRequest).user as UserRow;
   const { body } = req;
   const challengeId = req.cookies.webauthn_challenge_id;
@@ -650,14 +651,14 @@ app.post("/api/admin/webauthn/register/verify", authenticateAdmin, async (req, r
 });
 
 // Get WebAuthn Credentials
-app.get("/api/admin/webauthn/credentials", authenticateAdmin, (req, res) => {
+app.get("/api/admin/webauthn/credentials", csrfProtection, authenticateAdmin, (req, res) => {
   const user = (req as AuthenticatedRequest).user as UserRow;
   const credentials = db.prepare("SELECT id, created_at FROM webauthn_credentials WHERE user_id = ?").all(user.id);
   res.json(credentials);
 });
 
 // Delete WebAuthn Credential
-app.delete("/api/admin/webauthn/credentials/:id", authenticateAdmin, (req, res) => {
+app.delete("/api/admin/webauthn/credentials/:id", csrfProtection, authenticateAdmin, (req, res) => {
   const user = (req as AuthenticatedRequest).user as UserRow;
   const { id } = req.params;
   db.prepare("DELETE FROM webauthn_credentials WHERE id = ? AND user_id = ?").run(id, user.id);
@@ -666,7 +667,7 @@ app.delete("/api/admin/webauthn/credentials/:id", authenticateAdmin, (req, res) 
 });
 
 // Authentication Options
-app.post("/api/admin/webauthn/login/options", async (req, res) => {
+app.post("/api/admin/webauthn/login/options", csrfProtection, async (req, res) => {
   const { username } = req.body;
   if (!username) return res.status(400).json({ error: "Username required" });
 
@@ -693,7 +694,7 @@ app.post("/api/admin/webauthn/login/options", async (req, res) => {
 });
 
 // Authentication Verification
-app.post("/api/admin/webauthn/login/verify", async (req, res) => {
+app.post("/api/admin/webauthn/login/verify", csrfProtection, async (req, res) => {
   const { body, username } = req.body;
   const challengeId = req.cookies.webauthn_challenge_id;
 
