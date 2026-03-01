@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "eslint .",
+    "stats": "tsx scripts/stats.ts",
     "test": "vitest",
     "start": "NODE_ENV=production node server.ts",
     "start:prod": "NODE_ENV=production node server.ts"

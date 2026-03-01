@@ -38,7 +38,6 @@ To ensure high availability and prevent automated abuse, SecureShare implements 
 - **Dynamic Difficulty**: The challenge difficulty is dynamically adjusted by the server.
 - **Replay Protection**: A server-side SQLite nonce tracking system guarantees that a PoW solution can only be used exactly once.
 - **Strict Expiry**: Challenges are cryptographically salted with a timestamp and expire strictly after 10 minutes, preventing pre-computation attacks.
-- **API Exemption**: Programmatic access via valid API keys bypasses PoW, ensuring seamless automation for trusted systems.
 
 #### 3. Strong Key Derivation (KDF)
 When an optional access password is set, we don't use it directly as a key.
@@ -140,9 +139,9 @@ npm test
 npm run lint
 ```
 
-## 💡 Choosing Your Interface: GUI, CLI, or API?
+## 💡 Choosing Your Interface: GUI or CLI?
 
-SecureShare offers three ways to interact with the system, each designed for different needs.
+SecureShare offers two ways to interact with the system, each designed for different needs.
 
 | Interface | Best For... | Use Case Example |
 | :--- | :--- | :--- |
@@ -156,13 +155,11 @@ SecureShare offers three ways to interact with the system, each designed for dif
 -   **Cryptographic Proof of Work (PoW)**: Hashcash-style Anti-DoS protection with replay prevention and strict TTL.
 -   **Atomic Transactions**: Prevents race conditions during secret destruction using SQLite `IMMEDIATE` locks.
 -   **Zero-Knowledge Architecture**: The server never sees the decryption key or plaintext data.
--   **Hardened Session Management**: Strict CSRF protection, secure cookie attributes (`httpOnly`, `Secure`, `SameSite=Strict`), and explicit server-side logout.
 
 ## 🛡️ Security by Design
 
 SecureShare is built with a "Security by Design" philosophy, ensuring that security is not an afterthought but a core component of the architecture.
 
-- **Bcrypt Hashing**: All passwords and backup codes are hashed using `bcrypt` with a high cost factor (12 iterations).
 - **Zero-Knowledge**: Client-side encryption ensures the server never sees your plaintext data.
 
 ## 💻 API & Integrations

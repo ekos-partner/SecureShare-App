@@ -142,11 +142,13 @@ function verifyPasswordAndHandleBruteForce(db: Database.Database, secret: any, p
 
     if (newFailedAttempts >= MAX_ATTEMPTS) {
       db.prepare("DELETE FROM secrets WHERE id = ?").run(secret.id);
+      logEvent("SECRET_DELETED", `ID: ${secret.id} (Brute force protection)`);
       console.log(`[Security] Secret ${secret.id} burned after ${MAX_ATTEMPTS} failed attempts.`);
       return { status: 401, body: { error: "Too many failed attempts. Secret has been permanently deleted." } };
     }
 
     db.prepare("UPDATE secrets SET failed_attempts = ? WHERE id = ?").run(newFailedAttempts, secret.id);
+    logEvent("FAILED_ATTEMPT", `ID: ${secret.id}, Attempt: ${newFailedAttempts}`);
     return { 
       status: 401, 
       body: { error: `Invalid password. ${MAX_ATTEMPTS - newFailedAttempts} attempts remaining before permanent deletion.` } 
@@ -168,9 +170,11 @@ function handleViewLimit(db: Database.Database, secret: any) {
 
   if (isBurned) {
     db.prepare("DELETE FROM secrets WHERE id = ?").run(secret.id);
+    logEvent("SECRET_DELETED", `ID: ${secret.id} (View limit reached)`);
     console.log(`[ViewLimit] Secret ${secret.id} deleted after reaching view limit (${secret.view_limit}).`);
   } else {
     db.prepare("UPDATE secrets SET view_count = ? WHERE id = ?").run(newCount, secret.id);
+    logEvent("SECRET_VIEWED", `ID: ${secret.id}`);
   }
 
   return { success: true, burned: isBurned, remaining };
@@ -284,6 +288,25 @@ db.exec(`
   )
 `);
 
+db.exec(`
+  CREATE TABLE IF NOT EXISTS logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+    event TEXT NOT NULL,
+    details TEXT
+  )
+`);
+
+function logEvent(event: string, details: string = "") {
+  try {
+    db.prepare("INSERT INTO logs (event, details) VALUES (?, ?)").run(event, details);
+    // Keep only last 1000 logs
+    db.prepare("DELETE FROM logs WHERE id NOT IN (SELECT id FROM logs ORDER BY timestamp DESC LIMIT 1000)").run();
+  } catch (err) {
+    console.error("Failed to log event:", err);
+  }
+}
+
 // Cleanup old PoW nonces every hour
 setInterval(() => {
   db.prepare("DELETE FROM pow_nonces WHERE created_at < datetime('now', '-10 minutes')").run();
@@ -380,6 +403,7 @@ app.post("/api/secrets", createLimiter, (req, res) => {
       VALUES (?, ?, ?, ?, ?, ?)
     `);
     stmt.run(id, encryptedData, passwordHash || null, salt || null, expiresAt, viewLimit);
+    logEvent("SECRET_CREATED", `ID: ${id}, Expires: ${expiresAt}`);
     res.json({ id });
   } catch (error) {
     console.error("Database error:", error);
@@ -480,6 +504,7 @@ setInterval(() => {
     const now = new Date().toISOString();
     const result = db.prepare("DELETE FROM secrets WHERE expires_at < ?").run(now);
     if (result.changes > 0) {
+      logEvent("CLEANUP", `Deleted ${result.changes} expired secrets`);
       console.log(`[Cleanup] Deleted ${result.changes} expired secrets.`);
     }
   } catch (error) {

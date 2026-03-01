@@ -49,9 +49,7 @@ PORT=3000
 NODE_ENV=production
 APP_URL=https://your-domain.com
 DB_PATH=./data/secrets.db
-ADMIN_PASSWORD=your_strong_initial_password
 ```
-**IMPORTANT**: Set `ADMIN_PASSWORD` to a strong, unique password. This will be the initial password for the `admin` user. You will be required to change it upon first login.
 
 Ensure the data directory exists: `mkdir -p data`
 
@@ -143,6 +141,30 @@ docker push [YOUR_REGISTRY_NAME].azurecr.io/secureshare:v1
    - `WEBSITES_PORT` = `3000`
    - `APP_URL` = `https://your-app.azurewebsites.net`
    - `NODE_ENV` = `production`
+
+---
+
+## 📊 System Monitoring & Stats
+SecureShare includes a built-in tool to extract system statistics and logs directly from the host or container. This tool accesses the database directly and does not require the web server to be running.
+
+### How to use:
+
+**Traditional Installation (VPS):**
+```bash
+npm run stats
+```
+
+**Docker Installation:**
+```bash
+docker exec -it <container_id_or_name> npm run stats
+```
+
+This will output:
+- Total number of secrets in the database.
+- Number of expired secrets.
+- Total view count across all active secrets.
+- System uptime.
+- The last 10 system logs (creation, deletion, cleanup events).
 
 ---
 
