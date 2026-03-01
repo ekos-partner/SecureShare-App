@@ -29,7 +29,7 @@ This document outlines the security assumptions, trust boundaries, and threat mi
 - **Mitigation**: 
     - **Cryptographic Proof of Work (PoW)**: All secret creation requests must solve a dynamic Hashcash challenge. This makes automated spam economically unfeasible.
     - **PoW Replay Protection**: Server-side nonce tracking prevents the reuse of pre-computed PoW solutions.
-    - **Strict Rate Limiting**: IP-based limits enforced on all API endpoints.
+    - **Strict Rate Limiting**: IP-based limits enforced on all server endpoints.
     - **Burn-on-Fail Policy**: The secret is permanently deleted after 3 failed password attempts.
     - PBKDF2 with 100,000 iterations for key derivation.
 

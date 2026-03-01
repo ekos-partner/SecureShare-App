@@ -180,7 +180,7 @@ This will output:
     *   **Network Traffic Analysis**: Monitor network traffic for anomalies, unauthorized access attempts, and data exfiltration.
     *   **System Metrics**: Track CPU, memory, disk I/O, and network usage of your server instances.
     *   **Security Audits**: Regularly perform vulnerability scans, penetration testing, and code audits.
-    *   **Rate Limiting**: Monitor and alert on excessive requests to API endpoints, which could indicate brute-force attacks or abuse.
+    *   **Rate Limiting**: Monitor and alert on excessive requests to server endpoints, which could indicate brute-force attacks or abuse.
 8.  **Review Limitations**: Please read [LIMITATIONS.md](./LIMITATIONS.md) to understand the security model and what this app is NOT designed for.
 
 ## 🛠️ Troubleshooting

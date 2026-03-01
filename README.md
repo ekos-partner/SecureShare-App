@@ -47,7 +47,7 @@ When an optional access password is set, we don't use it directly as a key.
 #### 4. Brute-Force Protection & Auto-Destruction
 To prevent automated guessing and unauthorized access:
 - **Auto-Destruction**: A secret is **permanently deleted** from the database after 3 failed password attempts.
-- **Rate Limiting**: Strict IP-based and global rate limits are enforced on all API endpoints.
+- **Rate Limiting**: Strict IP-based and global rate limits are enforced on all server endpoints.
 - **Atomic Transactions**: Database reads and deletions are wrapped in strict `IMMEDIATE` SQLite transactions, completely eliminating race conditions (e.g., two people clicking a one-time link simultaneously).
 
 ### 🏛️ Architecture
@@ -63,7 +63,7 @@ graph TD
     end
 
     subgraph "SecureShare Server (Node.js + Express)"
-        E[API Endpoint] --> F[(SQLite Database)];
+        E[Secure Server] --> F[(SQLite Database)];
     end
 
     D -->|2. Send Blob to Server| E;
@@ -162,7 +162,7 @@ SecureShare is built with a "Security by Design" philosophy, ensuring that secur
 
 - **Zero-Knowledge**: Client-side encryption ensures the server never sees your plaintext data.
 
-## 💻 API & Integrations
+## 💻 CLI Tool
 A command-line interface (CLI) is provided for easy terminal-based sharing.
 
 - **[CLI Guide](./cli/README.md)**: Installation and usage instructions for the CLI.
