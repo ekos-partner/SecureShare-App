@@ -1,5 +1,5 @@
 {
   "name": "SecureShare",
-  "description": "Secure, end-to-end encrypted one-time secret sharing for organizations.",
+  "description": "Secure, end-to-end encrypted one-time secret sharing.",
   "requestFramePermissions": []
 }

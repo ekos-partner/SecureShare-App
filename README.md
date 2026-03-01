@@ -17,7 +17,6 @@ It's a simple tool that lets you create a **secure, one-time link** for your sen
 -   **🛡️ Anti-Spam Protection**: Built-in Proof of Work (Hashcash) prevents automated bots from flooding the service.
 -   **🔑 Password Protection**: Add an extra layer of security with a password (also hashed locally).
 -   **📱 Easy Mobile Sharing**: Generate a QR code to securely transfer the link to your mobile device.
--   **🛡️ Admin Dashboard**: Multi-user management with 2FA (TOTP) and detailed audit logs.
 
 ---
 
@@ -66,8 +65,6 @@ graph TD
 
     subgraph "SecureShare Server (Node.js + Express)"
         E[API Endpoint] --> F[(SQLite Database)];
-        G[Admin Dashboard] --> F;
-        H[REST API] --> F;
     end
 
     D -->|2. Send Blob to Server| E;
@@ -95,16 +92,6 @@ graph TD
 
     style F fill:#f9f,stroke:#333,stroke-width:2px
 ```
-
-## 🔐 Admin Panel & Management
-
-SecureShare includes a comprehensive administrative dashboard for managing the instance. It provides:
--   User management (multiple admins, password resets).
--   Two-Factor Authentication (2FA) for admin accounts.
--   API key generation and revocation.
--   Detailed audit logs of all system and user actions.
-
-For detailed instructions on setup, password management, and recovery, please see the **[Admin Guide](./ADMIN_GUIDE.md)**.
 
 ## 🚀 Deployment
 For detailed instructions on deploying to GCP, Azure, VPS, or using Docker with HTTPS, see the [Deployment Guide](./DEPLOYMENT.md).
@@ -161,7 +148,6 @@ SecureShare offers three ways to interact with the system, each designed for dif
 | :--- | :--- | :--- |
 | **🌐 GUI (Web App)** | **Manual, one-off sharing.** Ideal for all users, including non-technical ones. | Quickly sending a password to a colleague. |
 | **💻 CLI (Command Line)** | **Developers & Admins.** Perfect for scripting and terminal-based workflows. | A bash script that generates a temporary key and shares it. |
-| **🤖 API (REST)** | **Automated systems.** For deep integration with other applications. | A CI/CD pipeline that provides a database password to a deployment script. |
 
 ---
 
@@ -171,25 +157,17 @@ SecureShare offers three ways to interact with the system, each designed for dif
 -   **Atomic Transactions**: Prevents race conditions during secret destruction using SQLite `IMMEDIATE` locks.
 -   **Zero-Knowledge Architecture**: The server never sees the decryption key or plaintext data.
 -   **Hardened Session Management**: Strict CSRF protection, secure cookie attributes (`httpOnly`, `Secure`, `SameSite=Strict`), and explicit server-side logout.
--   **Multi-User Admin**: Secure dashboard with role-based access and `bcrypt` password hashing.
--   **Two-Factor Authentication (2FA)**: TOTP support for all administrative accounts.
--   **Audit Logging**: Comprehensive, privacy-respecting tracking of all administrative actions.
 
 ## 🛡️ Security by Design
 
 SecureShare is built with a "Security by Design" philosophy, ensuring that security is not an afterthought but a core component of the architecture.
 
-- **Strong Password Policy**: All administrative accounts require a minimum of **12 characters**.
-- **Mandatory 2FA Recovery**: Every 2FA setup generates **10 unique backup codes** for emergency access.
-- **Root Admin Protection**: The primary `admin` account can be recovered via a secure CLI tool, preventing permanent lockouts while maintaining high security.
 - **Bcrypt Hashing**: All passwords and backup codes are hashed using `bcrypt` with a high cost factor (12 iterations).
 - **Zero-Knowledge**: Client-side encryption ensures the server never sees your plaintext data.
 
 ## 💻 API & Integrations
-A powerful REST API is available for integrating SecureShare into your workflows. A command-line interface (CLI) is also provided for easy terminal-based sharing.
+A command-line interface (CLI) is provided for easy terminal-based sharing.
 
-- **[Admin Dashboard Guide](./ADMIN_GUIDE.md)**: How to manage users, 2FA, and API keys.
-- **[API Reference](./API_REFERENCE.md)**: Detailed endpoint and usage examples.
 - **[CLI Guide](./cli/README.md)**: Installation and usage instructions for the CLI.
 
 ## 🛠️ Technology Stack

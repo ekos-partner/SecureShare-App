@@ -26,13 +26,12 @@ import { encryptSecret, decryptSecret, hashPassword } from './lib/crypto';
 import clsx, { type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { QRCodeSVG } from 'qrcode.react';
-import AdminDashboard from './pages/AdminDashboard';
 
 function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-type ViewState = 'create' | 'success' | 'view' | 'error' | 'admin';
+type ViewState = 'create' | 'success' | 'view' | 'error';
 
 const getPasswordStrength = (pwd: string) => {
   if (!pwd) return 0;
@@ -173,8 +172,6 @@ export default function App() {
             setError('Invalid link format.');
             setView('error');
           }
-        } else if (path === '/admin' || path === '/admin/') {
-          setView('admin');
         } else if (path === '/' || path === '') {
           setView('create');
         }
@@ -425,8 +422,6 @@ export default function App() {
       setTimeout(() => setIsDownloadingQR(false), 1000);
     }
   };
-
-  if (view === 'admin') return <AdminDashboard />;
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-slate-950 transition-colors duration-300">
