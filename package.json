@@ -11,8 +11,8 @@
     "lint": "eslint .",
     "stats": "tsx scripts/stats.ts",
     "test": "vitest",
-    "start": "NODE_ENV=production node server.ts",
-    "start:prod": "NODE_ENV=production node server.ts"
+    "start": "NODE_ENV=production tsx server.ts",
+    "start:prod": "NODE_ENV=production tsx server.ts"
   },
   "dependencies": {
     "better-sqlite3": "^12.4.1",
