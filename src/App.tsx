@@ -97,8 +97,8 @@ const validateGenerateResponse = (res: Response) => {
 
 export default function App() {
   /**
-   * APPLICATION STATE
-   * We use React hooks to manage the UI state, form inputs, and API responses.
+   * APPLICATION STATE MANAGEMENT
+   * We utilize React hooks to maintain UI state, form inputs, and handle cryptographic operations.
    */
   const [view, setView] = useState<ViewState>('create');
   const [secret, setSecret] = useState('');
@@ -132,21 +132,21 @@ export default function App() {
 
 
   /**
-   * THEME INITIALIZATION
-   * Force dark mode for a consistent, professional look.
-   * Note: Security headers like CSP and HSTS are enforced server-side for maximum protection.
+   * THEME & INITIALIZATION
+   * Enforces a consistent dark-themed interface for a professional, focused user experience.
+   * Security headers (CSP, HSTS) are strictly managed server-side.
    */
   useEffect(() => {
     document.documentElement.classList.add('dark');
   }, []);
 
   /**
-   * ROUTING & LINK HANDLING
-   * We use the window location to determine if the user is creating a secret
-   * or viewing one via a shared link.
+   * ROUTING & DECRYPTION LOGIC
+   * Parses the URL to determine if the user is creating a secret or viewing one.
    * 
-   * SECURITY NOTE: The decryption key is extracted from the URL fragment (#),
-   * which is never sent to the server.
+   * SECURITY ARCHITECTURE: The decryption key is extracted from the URL fragment (#).
+   * Per W3C standards, the fragment is never transmitted to the server, ensuring
+   * that the server remains zero-knowledge regarding the secret's content.
    */
   useEffect(() => {
     const processLocation = () => {

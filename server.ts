@@ -1,15 +1,13 @@
 /**
  * SECURESHARE SERVER
  * 
- * This is the main server file for the SecureShare application.
- * It handles API requests, serves the frontend, and manages the SQLite database.
+ * This is the primary server for the SecureShare application.
+ * It manages secret storage, cryptographic challenges, and serves the frontend.
  * 
- * SECURITY FEATURES IMPLEMENTED:
- * 1. Content Security Policy (CSP): Prevents XSS attacks by restricting sources.
- * 2. HSTS: Enforces HTTPS connections.
- * 3. Rate Limiting: Prevents abuse and brute-force attacks.
- * 4. Atomic Transactions: Ensures "burn-after-reading" logic is race-condition free.
- * 5. Input Validation: Uses Zod to strictly validate all incoming data.
+ * SECURITY ARCHITECTURE:
+ * 1. Zero-Knowledge: The server never sees decryption keys or plaintext data.
+ * 2. Defense in Depth: Multiple layers of protection (CSP, HSTS, Rate Limiting, PoW).
+ * 3. Atomic Operations: SQLite transactions prevent race conditions in "burn-after-reading" logic.
  */
 
 import express from "express";
@@ -184,20 +182,6 @@ const app = express();
 app.set('trust proxy', 1); // Trust the first proxy (Cloud Run, Nginx, etc.)
 const PORT = Number.parseInt(process.env.PORT || "3000", 10);
 
-// Disable X-Powered-By to prevent technology fingerprinting (Proxy Disclosure)
-app.disable('x-powered-by');
-
-// Disable TRACE method (Proxy Disclosure)
-app.use((req, res, next) => {
-  if (req.method === 'TRACE') {
-    return res.status(405).send('Method Not Allowed');
-  }
-  next();
-});
-
-// Trust proxy is required for rate limiting and secure cookies to work behind Nginx/Cloud Run
-app.set('trust proxy', 1);
-
 // Generate a nonce for each request
 app.use((req, res, next) => {
   res.locals.nonce = crypto.randomBytes(16).toString('hex');
@@ -257,7 +241,7 @@ app.use(express.json({ limit: '1.1mb' }));
  */
 const globalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 300, // Increased limit for general API usage
+  max: 300, // General usage limit
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: "Too many requests from this IP, please try again later." }
