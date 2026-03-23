@@ -84,14 +84,22 @@ const getAppOrigin = () => {
   }
 };
 
-const validateGenerateResponse = (res: Response) => {
+const validateGenerateResponse = async (res: Response) => {
   if (!res.ok) {
     if (res.status === 429) {
       const retryAfter = res.headers.get('Retry-After');
       const waitMsg = retryAfter ? ` Please wait ${Math.ceil(Number.parseInt(retryAfter, 10) / 60)} minute(s).` : ' Please wait a while.';
       throw new Error('Creation limit reached.' + waitMsg);
     }
-    throw new Error('Failed to generate link');
+    try {
+      const data = await res.json();
+      throw new Error(data.error || 'Failed to generate link');
+    } catch (e) {
+      if (e instanceof Error && e.message !== 'Failed to generate link') {
+        throw e;
+      }
+      throw new Error(`Failed to generate link (Status: ${res.status})`);
+    }
   }
 };
 
@@ -117,6 +125,7 @@ export default function App() {
   const [viewEncryptedData, setViewEncryptedData] = useState('');
   const [viewHasPassword, setViewHasPassword] = useState(false);
   const [viewSalt, setViewSalt] = useState('');
+  const [viewKdfConfig, setViewKdfConfig] = useState('');
   const [viewPassword, setViewPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [showViewPassword, setShowViewPassword] = useState(false);
@@ -208,6 +217,7 @@ export default function App() {
       setViewEncryptedData(data.encryptedData);
       setViewHasPassword(data.hasPassword);
       setViewSalt(data.salt || '');
+      setViewKdfConfig(data.kdfConfig || '');
       setView('view');
     } catch (err: unknown) {
       if (err instanceof Error) {
@@ -244,8 +254,8 @@ export default function App() {
   };
 
   const performSecretGeneration = async () => {
-    const { encryptedData, key, salt } = await encryptSecret(secret, password);
-    const pHash = (password && salt) ? await hashPassword(password, salt) : null;
+    const { encryptedData, key, salt, kdfConfig } = await encryptSecret(secret, password);
+    const pHash = (password && salt) ? await hashPassword(password, salt, kdfConfig) : null;
     
     // Fetch PoW Challenge
     const challengeRes = await fetch('/api/pow/challenge');
@@ -262,6 +272,7 @@ export default function App() {
         encryptedData,
         passwordHash: pHash,
         salt: salt,
+        kdfConfig: kdfConfig,
         expirationHours: Number.parseInt(expiration, 10),
         viewLimit: Number.parseInt(viewLimit, 10),
         powNonce,
@@ -269,7 +280,7 @@ export default function App() {
       })
     });
     
-    validateGenerateResponse(res);
+    await validateGenerateResponse(res);
     
     const { id } = await res.json();
     return `${getAppOrigin()}/s/${id}#${key}`;
@@ -312,8 +323,8 @@ export default function App() {
      */
     setError('');
     try {
-      const decrypted = await decryptSecret(viewEncryptedData, viewKey, viewPassword, viewSalt);
-      const pHash = (viewPassword && viewSalt) ? await hashPassword(viewPassword, viewSalt) : null;
+      const decrypted = await decryptSecret(viewEncryptedData, viewKey, viewPassword, viewSalt, viewKdfConfig);
+      const pHash = (viewPassword && viewSalt) ? await hashPassword(viewPassword, viewSalt, viewKdfConfig) : null;
       
       // Burn the secret (increment view count)
       const res = await fetch(`/api/secrets/${viewId}/burn`, {
@@ -570,6 +581,15 @@ export default function App() {
                     </div>
                   )}
                 </div>
+
+                {error && (
+                  <div className="p-4 bg-red-50 dark:bg-red-900/20 border border-red-100 dark:border-red-900/30 rounded-2xl flex items-center gap-3">
+                    <AlertCircle className="w-5 h-5 text-red-600 dark:text-red-400 shrink-0" />
+                    <p className="text-sm text-red-800 dark:text-red-300 font-semibold">
+                      {error}
+                    </p>
+                  </div>
+                )}
 
                 <button
                   onClick={handleGenerate}

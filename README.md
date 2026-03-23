@@ -41,7 +41,10 @@ To ensure high availability and prevent automated abuse, SecureShare implements 
 
 #### 3. Strong Key Derivation (KDF)
 When an optional access password is set, we don't use it directly as a key.
-- **Mechanism**: PBKDF2 with 100,000 iterations and SHA-256.
+- **Mechanism**: Argon2id (OWASP 2025 recommended).
+  - Memory: 19 MiB
+  - Iterations: 2
+  - Parallelism: 1
 - **Salt**: Every secret has a unique, cryptographically secure random salt generated on the client.
 
 #### 4. Brute-Force Protection & Auto-Destruction
@@ -171,7 +174,7 @@ A command-line interface (CLI) is provided for easy terminal-based sharing.
 - **Frontend**: React 19, Tailwind CSS 4, Motion.
 - **Backend**: Node.js (Express) with `helmet` and `express-rate-limit`.
 - **Database**: SQLite with indexed TTL (Time-To-Live) for high-performance automated cleanup.
-- **Encryption**: Web Crypto API (AES-256-GCM, PBKDF2, SHA-256).
+- **Encryption**: Web Crypto API (AES-256-GCM, SHA-256) and hash-wasm (Argon2id).
 
 ## 📋 Compliance & Standards
 - **RFC 9116**: `security.txt` is implemented at `/.well-known/security.txt` and `/security.txt`.

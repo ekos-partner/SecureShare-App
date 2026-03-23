@@ -5,6 +5,7 @@ A command-line interface for SecureShare, written in Go. This tool allows you to
 ## Features
 
 - **Client-Side Encryption**: Uses AES-256-GCM locally. The server never sees the raw secret or the key.
+- **Strong Key Derivation**: Uses Argon2id for password hashing, matching the web app's security standards.
 - **Cross-Platform**: Compiles to a single binary for Windows, macOS, and Linux.
 - **Pipe Support**: Can read secrets from stdin (e.g., `cat file.txt | secureshare-cli`).
 - **Secure Defaults**: Generates strong random keys and IVs.

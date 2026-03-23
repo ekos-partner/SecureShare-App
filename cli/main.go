@@ -18,7 +18,7 @@ import (
 	"strings"
 	"time"
 
-	"golang.org/x/crypto/pbkdf2"
+	"golang.org/x/crypto/argon2"
 )
 
 var (
@@ -29,13 +29,27 @@ const (
 	keySize    = 32
 	ivSize     = 12
 	saltSize   = 16
-	iterations = 100000
 )
+
+type KdfConfig struct {
+	Algorithm   string `json:"algorithm"`
+	Iterations  uint32 `json:"iterations"`
+	MemorySize  uint32 `json:"memorySize"`
+	Parallelism uint8  `json:"parallelism"`
+}
+
+var defaultKdfConfig = KdfConfig{
+	Algorithm:   "argon2id",
+	Iterations:  2,
+	MemorySize:  19456,
+	Parallelism: 1,
+}
 
 type CreateSecretRequest struct {
 	EncryptedData   string  `json:"encryptedData"`
 	PasswordHash    *string `json:"passwordHash,omitempty"`
 	Salt            *string `json:"salt,omitempty"`
+	KdfConfig       *string `json:"kdfConfig,omitempty"`
 	ExpirationHours int     `json:"expirationHours"`
 	ViewLimit       int     `json:"viewLimit"`
 	PowNonce        string  `json:"powNonce,omitempty"`
@@ -80,6 +94,7 @@ type GetSecretResponse struct {
 	EncryptedData string  `json:"encryptedData"`
 	HasPassword   bool    `json:"hasPassword"`
 	Salt          *string `json:"salt,omitempty"`
+	KdfConfig     *string `json:"kdfConfig,omitempty"`
 }
 
 type BurnSecretRequest struct {
@@ -253,10 +268,16 @@ func handleGet(args []string) {
 		salt, err := base64.StdEncoding.DecodeString(*meta.Salt)
 		failOnError(err, "decoding salt")
 
-		combinedSecret := keyBase64 + pw
-		encryptionKey = pbkdf2.Key([]byte(combinedSecret), salt, iterations, keySize, sha256.New)
+		kdf := defaultKdfConfig
+		if meta.KdfConfig != nil {
+			err = json.Unmarshal([]byte(*meta.KdfConfig), &kdf)
+			failOnError(err, "decoding KDF config")
+		}
 
-		pwHash := pbkdf2.Key([]byte(pw), salt, iterations, 32, sha256.New)
+		combinedSecret := keyBase64 + pw
+		encryptionKey = argon2.IDKey([]byte(combinedSecret), salt, kdf.Iterations, kdf.MemorySize, kdf.Parallelism, uint32(keySize))
+
+		pwHash := argon2.IDKey([]byte(pw), salt, kdf.Iterations, kdf.MemorySize, kdf.Parallelism, 32)
 		ph := base64.StdEncoding.EncodeToString(pwHash)
 		passwordHashBase64 = &ph
 	} else {
@@ -370,6 +391,7 @@ func handleCreate(args []string) {
 	var encryptionKey []byte
 	var saltBase64 *string
 	var passwordHashBase64 *string
+	var kdfConfigBase64 *string
 
 	if *password != "" {
 		salt := make([]byte, saltSize)
@@ -379,10 +401,15 @@ func handleCreate(args []string) {
 		s := base64.StdEncoding.EncodeToString(salt)
 		saltBase64 = &s
 
-		combinedSecret := keyBase64 + *password
-		encryptionKey = pbkdf2.Key([]byte(combinedSecret), salt, iterations, keySize, sha256.New)
+		kdf := defaultKdfConfig
+		kdfJSON, _ := json.Marshal(kdf)
+		kdfStr := string(kdfJSON)
+		kdfConfigBase64 = &kdfStr
 
-		pwHash := pbkdf2.Key([]byte(*password), salt, iterations, 32, sha256.New)
+		combinedSecret := keyBase64 + *password
+		encryptionKey = argon2.IDKey([]byte(combinedSecret), salt, kdf.Iterations, kdf.MemorySize, kdf.Parallelism, uint32(keySize))
+
+		pwHash := argon2.IDKey([]byte(*password), salt, kdf.Iterations, kdf.MemorySize, kdf.Parallelism, 32)
 		ph := base64.StdEncoding.EncodeToString(pwHash)
 		passwordHashBase64 = &ph
 	} else {
@@ -425,6 +452,7 @@ func handleCreate(args []string) {
 		EncryptedData:   encryptedData,
 		PasswordHash:    passwordHashBase64,
 		Salt:            saltBase64,
+		KdfConfig:       kdfConfigBase64,
 		ExpirationHours: *expiration,
 		ViewLimit:       *views,
 		PowNonce:        nonce,

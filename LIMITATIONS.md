@@ -6,7 +6,7 @@ This document outlines the security assumptions, limitations, and intended use c
 1.  **NOT a Password Manager**: Do not use this for long-term storage of credentials.
 2.  **NOT a File Storage Service**: Designed for small text secrets (max 1MB), not large files.
 3.  **NOT Anonymity Tool**: While we don't log IP addresses in the database, the server logs (Nginx/Cloud Run) might.
-4.  **NOT Quantum-Safe**: Uses AES-256-GCM and PBKDF2-SHA256, which are standard today but not quantum-resistant.
+4.  **NOT Quantum-Safe**: Uses AES-256-GCM and Argon2id, which are standard today but not quantum-resistant.
 
 ## 🛡️ Security Architecture
 -   **Client-Side Encryption**: Data is encrypted in the browser using **AES-256-GCM** (Web Crypto API).

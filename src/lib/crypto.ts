@@ -1,3 +1,5 @@
+import { argon2id } from 'hash-wasm';
+
 /**
  * Modern Cryptography Module using Web Crypto API (AES-GCM)
  * 
@@ -7,19 +9,14 @@
  * all sensitive data is encrypted *before* it ever leaves the user's device. The server
  * only receives opaque, authenticated ciphertexts.
  * 
- * Cryptographic Primitives Used:
- * - Algorithm: AES-256-GCM (Galois/Counter Mode). Chosen for Authenticated Encryption with 
- *   Associated Data (AEAD), providing both strict confidentiality and cryptographic integrity.
- * - Key Length: 256 bits (Military-grade encryption standard).
- * - IV (Initialization Vector): 12 bytes (96 bits) cryptographically secure random nonce, 
- *   unique per encryption operation to prevent stream cipher reuse attacks.
- * - Key Derivation Function (KDF): PBKDF2-SHA-256 with 100,000 iterations. Used to derive 
- *   strong encryption keys from user-provided passwords, heavily mitigating brute-force and 
- *   dictionary attacks.
+ * Cryptographic Primitives Used (2025 Standards):
+ * - Algorithm: AES-256-GCM (Galois/Counter Mode).
+ * - Key Derivation Function (KDF): Argon2id (OWASP 2025 recommended).
+ *   - Memory: 19 MiB
+ *   - Iterations: 2
+ *   - Parallelism: 1
  * 
- * This implementation strictly utilizes the native browser `window.crypto.subtle` API, 
- * ensuring execution in a secure, optimized, and audited environment, replacing legacy 
- * JavaScript-based crypto libraries.
+ * NOTE: Legacy PBKDF2 support has been removed. Only Argon2id is supported.
  */
 
 // Helper to convert ArrayBuffer to Base64 string
@@ -56,9 +53,23 @@ function arrayBufferToString(buffer: ArrayBuffer): string {
   return decoder.decode(buffer);
 }
 
-const AES_GCM_IV_LENGTH = 12; // 96 bits is recommended for AES-GCM
-const PBKDF2_ITERATIONS = 100000;
-const AES_KEY_LENGTH = 256;
+const AES_GCM_IV_LENGTH = 12; 
+
+// KDF Configurations
+export interface KDFConfig {
+  algorithm: 'argon2id';
+  iterations: number;
+  memorySize: number; // in KiB
+  parallelism: number;
+}
+
+// Default config for new secrets (OWASP 2025 Argon2id)
+export const DEFAULT_KDF_CONFIG: KDFConfig = {
+  algorithm: 'argon2id',
+  iterations: 2,
+  memorySize: 19456, // 19 MiB
+  parallelism: 1
+};
 
 /**
  * Generates a cryptographically secure random salt/IV.
@@ -70,29 +81,25 @@ function generateRandomBytes(length: number): Uint8Array {
 }
 
 /**
- * Derives an AES-GCM key from a raw key material (or password) using PBKDF2.
+ * Derives an AES-GCM key from a raw key material (or password) using Argon2id.
  */
-async function deriveKey(keyMaterial: string, salt: Uint8Array): Promise<CryptoKey> {
-  const enc = new TextEncoder();
-  const keyMaterialBuffer = enc.encode(keyMaterial);
+async function deriveKey(keyMaterial: string, salt: Uint8Array, config?: KDFConfig): Promise<CryptoKey> {
+  const kdf = config || DEFAULT_KDF_CONFIG;
 
-  const importedKey = await window.crypto.subtle.importKey(
+  const hash = await argon2id({
+    password: keyMaterial,
+    salt: salt,
+    iterations: kdf.iterations,
+    memorySize: kdf.memorySize,
+    parallelism: kdf.parallelism,
+    hashLength: 32,
+    outputType: 'binary',
+  });
+  
+  return window.crypto.subtle.importKey(
     "raw",
-    keyMaterialBuffer,
-    { name: "PBKDF2" },
-    false,
-    ["deriveKey"]
-  );
-
-  return window.crypto.subtle.deriveKey(
-    {
-      name: "PBKDF2",
-      salt: salt,
-      iterations: PBKDF2_ITERATIONS,
-      hash: "SHA-256"
-    },
-    importedKey,
-    { name: "AES-GCM", length: AES_KEY_LENGTH },
+    hash,
+    { name: "AES-GCM" },
     false,
     ["encrypt", "decrypt"]
   );
@@ -100,10 +107,8 @@ async function deriveKey(keyMaterial: string, salt: Uint8Array): Promise<CryptoK
 
 /**
  * Imports a raw key string (from URL) directly as an AES-GCM key.
- * Used when no password is set.
  */
 async function importRawKey(rawKeyStr: string): Promise<CryptoKey> {
-  // The key in URL is base64 encoded 32 bytes
   const keyBuffer = base64ToArrayBuffer(rawKeyStr);
   return window.crypto.subtle.importKey(
     "raw",
@@ -116,38 +121,27 @@ async function importRawKey(rawKeyStr: string): Promise<CryptoKey> {
 
 /**
  * Encrypts a string using AES-GCM.
- * Returns:
- * - encryptedData: Base64 string containing "IV:Ciphertext"
- * - key: Base64 string of the raw key (to be put in URL)
- * - salt: Base64 string (if password used)
  */
-export async function encryptSecret(text: string, password?: string): Promise<{ encryptedData: string; key: string; salt?: string }> {
+export async function encryptSecret(text: string, password?: string): Promise<{ encryptedData: string; key: string; salt?: string; kdfConfig?: string }> {
   const iv = generateRandomBytes(AES_GCM_IV_LENGTH);
   const dataBuffer = stringToArrayBuffer(text);
   
   let key: CryptoKey;
   let keyStr: string;
-  let salt: Uint8Array | undefined;
   let saltStr: string | undefined;
+  let kdfConfigStr: string | undefined;
 
   if (password) {
-    // Password-based encryption
-    salt = generateRandomBytes(16);
+    const salt = generateRandomBytes(16);
     saltStr = arrayBufferToBase64(salt.buffer);
-    // We generate a random "base key" for the URL, and mix it with password
-    // Actually, to keep it simple and consistent with previous logic:
-    // If password exists, we derive the key from (RandomKey + Password).
-    // The URL fragment holds the RandomKey.
     
     const randomKeyBytes = generateRandomBytes(32);
     keyStr = arrayBufferToBase64(randomKeyBytes.buffer);
     
-    // Combine RandomKey + Password for derivation
     const combinedSecret = keyStr + password;
-    key = await deriveKey(combinedSecret, salt);
+    key = await deriveKey(combinedSecret, salt, DEFAULT_KDF_CONFIG);
+    kdfConfigStr = JSON.stringify(DEFAULT_KDF_CONFIG);
   } else {
-    // Key-based encryption (no password)
-    // Generate a random 256-bit key
     key = await window.crypto.subtle.generateKey(
       { name: "AES-GCM", length: 256 },
       true,
@@ -158,15 +152,11 @@ export async function encryptSecret(text: string, password?: string): Promise<{ 
   }
 
   const encryptedBuffer = await window.crypto.subtle.encrypt(
-    {
-      name: "AES-GCM",
-      iv: iv
-    },
+    { name: "AES-GCM", iv: iv },
     key,
     dataBuffer
   );
 
-  // Pack IV and Ciphertext together: "IV_BASE64:CIPHERTEXT_BASE64"
   const ivBase64 = arrayBufferToBase64(iv.buffer);
   const ciphertextBase64 = arrayBufferToBase64(encryptedBuffer);
   const packedData = `${ivBase64}:${ciphertextBase64}`;
@@ -174,16 +164,16 @@ export async function encryptSecret(text: string, password?: string): Promise<{ 
   return {
     encryptedData: packedData,
     key: keyStr,
-    salt: saltStr
+    salt: saltStr,
+    kdfConfig: kdfConfigStr
   };
 }
 
 /**
  * Decrypts a string using AES-GCM.
  */
-export async function decryptSecret(encryptedDataPacked: string, keyStr: string, password?: string, saltStr?: string): Promise<string> {
+export async function decryptSecret(encryptedDataPacked: string, keyStr: string, password?: string, saltStr?: string, kdfConfigStr?: string): Promise<string> {
   try {
-    // Unpack IV and Ciphertext
     const parts = encryptedDataPacked.split(':');
     if (parts.length !== 2) throw new Error("Invalid data format");
     
@@ -195,16 +185,14 @@ export async function decryptSecret(encryptedDataPacked: string, keyStr: string,
     if (password && saltStr) {
       const salt = base64ToArrayBuffer(saltStr);
       const combinedSecret = keyStr + password;
-      key = await deriveKey(combinedSecret, new Uint8Array(salt));
+      const kdfConfig = kdfConfigStr ? JSON.parse(kdfConfigStr) : DEFAULT_KDF_CONFIG;
+      key = await deriveKey(combinedSecret, new Uint8Array(salt), kdfConfig);
     } else {
       key = await importRawKey(keyStr);
     }
 
     const decryptedBuffer = await window.crypto.subtle.decrypt(
-      {
-        name: "AES-GCM",
-        iv: new Uint8Array(iv)
-      },
+      { name: "AES-GCM", iv: new Uint8Array(iv) },
       key,
       ciphertext
     );
@@ -217,32 +205,20 @@ export async function decryptSecret(encryptedDataPacked: string, keyStr: string,
 }
 
 /**
- * Hashes a password for server-side verification using PBKDF2.
- * This is stronger than simple SHA-256 and satisfies security scanners.
+ * Hashes a password for server-side verification using Argon2id.
  */
-export async function hashPassword(password: string, saltStr: string): Promise<string> {
+export async function hashPassword(password: string, saltStr: string, kdfConfigStr?: string): Promise<string> {
   const salt = base64ToArrayBuffer(saltStr);
-  const enc = new TextEncoder();
-  const keyMaterial = enc.encode(password);
+  const kdf = kdfConfigStr ? JSON.parse(kdfConfigStr) : DEFAULT_KDF_CONFIG;
 
-  const importedKey = await window.crypto.subtle.importKey(
-    "raw",
-    keyMaterial,
-    { name: "PBKDF2" },
-    false,
-    ["deriveBits"]
-  );
-
-  const derivedBits = await window.crypto.subtle.deriveBits(
-    {
-      name: "PBKDF2",
-      salt: new Uint8Array(salt),
-      iterations: PBKDF2_ITERATIONS,
-      hash: "SHA-256"
-    },
-    importedKey,
-    256
-  );
-
-  return arrayBufferToBase64(derivedBits);
+  const hash = await argon2id({
+    password: password,
+    salt: new Uint8Array(salt),
+    iterations: kdf.iterations,
+    memorySize: kdf.memorySize,
+    parallelism: kdf.parallelism,
+    hashLength: 32,
+    outputType: 'binary',
+  });
+  return arrayBufferToBase64(hash.buffer);
 }

@@ -70,6 +70,7 @@ const db = getDatabase();
  * - salt: Random salt used for password hashing (optional).
  * - view_limit: Max number of times the secret can be opened.
  * - failed_attempts: Counter for brute-force protection on password-protected secrets.
+ * - kdf_config: JSON string containing Argon2id parameters (memory, iterations, parallelism).
  */
 db.exec(`
   CREATE TABLE IF NOT EXISTS secrets (
@@ -81,6 +82,7 @@ db.exec(`
     view_limit INTEGER DEFAULT 1,
     view_count INTEGER DEFAULT 0,
     failed_attempts INTEGER DEFAULT 0,
+    kdf_config TEXT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   )
 `);
@@ -106,6 +108,11 @@ db.exec(`CREATE INDEX IF NOT EXISTS idx_secrets_expires_at ON secrets (expires_a
     } catch { 
       // ignore 
     }
+    try {
+      db.exec("ALTER TABLE secrets ADD COLUMN kdf_config TEXT");
+    } catch {
+      // ignore
+    }
 
 /**
  * INPUT VALIDATION
@@ -117,6 +124,7 @@ const CreateSecretSchema = z.object({
   salt: z.string().nullable().optional(),
   expirationHours: z.union([z.string(), z.number()]).transform(Number),
   viewLimit: z.union([z.string(), z.number()]).transform(Number),
+  kdfConfig: z.string().nullable().optional(),
   powNonce: z.string().optional(),
   powSalt: z.string().optional(),
 });
@@ -179,7 +187,7 @@ function handleViewLimit(db: Database.Database, secret: any) {
 }
 
 const app = express();
-app.set('trust proxy', 1); // Trust the first proxy (Cloud Run, Nginx, etc.)
+app.set('trust proxy', true); // Trust all proxies (Cloudflare, Cloud Run, Nginx, etc.) to get the real client IP
 const PORT = Number.parseInt(process.env.PORT || "3000", 10);
 
 // Generate a nonce for each request
@@ -241,27 +249,43 @@ app.use(express.json({ limit: '1.1mb' }));
  */
 const globalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 300, // General usage limit
+  max: 3000, // Increased limit to prevent false positives with static assets
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: (req) => {
+    // Fallback to x-forwarded-for if req.ip is somehow undefined or shared
+    const forwarded = req.headers['x-forwarded-for'];
+    const ip = typeof forwarded === 'string' ? forwarded.split(',')[0].trim() : req.ip;
+    return ip || 'unknown';
+  },
   message: { error: "Too many requests from this IP, please try again later." }
 });
-app.use(globalLimiter);
+app.use('/api', globalLimiter);
 
 const createLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
-  max: 20, // Strict limit for secret creation
+  max: 200, // Increased limit for secret creation
   standardHeaders: true,
   legacyHeaders: false,
+  keyGenerator: (req) => {
+    const forwarded = req.headers['x-forwarded-for'];
+    const ip = typeof forwarded === 'string' ? forwarded.split(',')[0].trim() : req.ip;
+    return ip || 'unknown';
+  },
   message: { error: "Creation limit reached. Please try again later." }
 });
 
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 5, // Very strict limit for failed password attempts
+  max: 50, // Increased limit for failed password attempts
   standardHeaders: true,
   legacyHeaders: false,
   skipSuccessfulRequests: true,
+  keyGenerator: (req) => {
+    const forwarded = req.headers['x-forwarded-for'];
+    const ip = typeof forwarded === 'string' ? forwarded.split(',')[0].trim() : req.ip;
+    return ip || 'unknown';
+  },
   message: { error: "Too many failed attempts. Please wait 15 minutes." }
 });
 
@@ -368,7 +392,7 @@ app.post("/api/secrets", createLimiter, (req, res) => {
     return res.status(400).json({ error: "Invalid input data", details: result.error.format() });
   }
 
-  const { encryptedData, passwordHash, salt, expirationHours, viewLimit } = result.data;
+  const { encryptedData, passwordHash, salt, expirationHours, viewLimit, kdfConfig } = result.data;
   
   // Enforce limits
   if (expirationHours < 1 || expirationHours > 168) {
@@ -383,10 +407,10 @@ app.post("/api/secrets", createLimiter, (req, res) => {
 
   try {
     const stmt = db.prepare(`
-      INSERT INTO secrets (id, encrypted_data, password_hash, salt, expires_at, view_limit)
-      VALUES (?, ?, ?, ?, ?, ?)
+      INSERT INTO secrets (id, encrypted_data, password_hash, salt, expires_at, view_limit, kdf_config)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
     `);
-    stmt.run(id, encryptedData, passwordHash || null, salt || null, expiresAt, viewLimit);
+    stmt.run(id, encryptedData, passwordHash || null, salt || null, expiresAt, viewLimit, kdfConfig || null);
     logEvent("SECRET_CREATED", `ID: ${id}, Expires: ${expiresAt}`);
     res.json({ id });
   } catch (error) {
@@ -405,6 +429,7 @@ app.get("/api/secrets/:id", (req, res) => {
     encrypted_data: string;
     password_hash: string | null;
     salt: string | null;
+    kdf_config: string | null;
     expires_at: string;
     view_limit: number;
     view_count: number;
@@ -422,7 +447,8 @@ app.get("/api/secrets/:id", (req, res) => {
     res.json({
       encryptedData: secret.encrypted_data,
       hasPassword: !!secret.password_hash,
-      salt: secret.salt
+      salt: secret.salt,
+      kdfConfig: secret.kdf_config
     });
   } catch (error) {
     console.error("Transaction error:", error);

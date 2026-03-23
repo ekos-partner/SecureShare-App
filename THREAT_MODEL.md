@@ -31,7 +31,7 @@ This document outlines the security assumptions, trust boundaries, and threat mi
     - **PoW Replay Protection**: Server-side nonce tracking prevents the reuse of pre-computed PoW solutions.
     - **Strict Rate Limiting**: IP-based limits enforced on all server endpoints.
     - **Burn-on-Fail Policy**: The secret is permanently deleted after 3 failed password attempts.
-    - PBKDF2 with 100,000 iterations for key derivation.
+    - Argon2id (19MiB, 2 iterations, 1 parallelism) for all secrets.
 
 ### D. Link Enumerator / Scraper
 - **Threat**: Guessing secret IDs to find valid secrets.
