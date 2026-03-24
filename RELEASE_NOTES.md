@@ -1,4 +1,4 @@
-# 🚀 Release Notes - SecureShare v3.0.1
+# 🚀 Release Notes - SecureShare v4.0.0
 
 **Title: The Zero-Knowledge Refinement Update**
 
