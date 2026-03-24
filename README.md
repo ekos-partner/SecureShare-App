@@ -178,10 +178,16 @@ A command-line interface (CLI) is provided for easy terminal-based sharing.
 
 ## 📋 Compliance & Standards
 - **RFC 9116**: `security.txt` is implemented at `/.well-known/security.txt` and `/security.txt`.
-- **Security Policy**: Publicly accessible at `/security-policy`.
+- **Security Policy**: Publicly accessible at `/security-policy`. See [SECURITY.md](./SECURITY.md).
 - **Opaque Errors**: Prevents enumeration attacks.
 
 ## ⚙️ Technical Limits
 - **Secret Size**: Maximum 1MB of encrypted data per secret.
 - **View Limit**: Maximum 10 views per secret.
 - **Expiration**: Maximum 7 days (168 hours).
+
+## 🤝 Contributing
+Please see [CONTRIBUTING.md](./CONTRIBUTING.md) and our [Code of Conduct](./CODE_OF_CONDUCT.md) for details on how to contribute to this project.
+
+## 📝 Release Notes
+For a detailed list of changes, see the [Release Notes](./RELEASE_NOTES.md).

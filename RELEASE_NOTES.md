@@ -1,24 +1,36 @@
-# 🚀 Release Notes - SecureShare v4.0.0
+# Release Notes
 
-**Title: The Zero-Knowledge Refinement Update**
+## v4.0.1 (Current)
 
-**Description:**
-This maintenance release focuses on optimizing the core architecture for high-performance production environments. We have stripped away legacy administrative overhead to deliver a leaner, faster, and more secure secret-sharing experience. By transitioning to a pure Zero-Knowledge model with a dedicated CLI tool, SecureShare v3.0.1 ensures that your sensitive data remains private and your infrastructure stays lightweight.
+### Auditor Improvements & Security Fixes
+*   **Build Consistency**: Synchronized `package-lock.json` with `package.json` overrides to ensure deterministic and secure builds across Docker (`npm ci`) and local environments (`npm install`).
+*   **Dependency Patching**: Resolved security vulnerabilities by enforcing patched versions of `flatted` and `express-rate-limit` across the entire dependency tree.
+*   **Code Cleanup**: Removed dead code and obsolete commented-out middleware configurations in `server.ts` for better readability and maintainability.
+*   **License Compliance**: Corrected the `SPDX-License-Identifier` header in `src/App.tsx` from Apache-2.0 to MIT to properly reflect the project's official license.
+
+---
+
+## v4.0.0
+
+### Security Enhancements
+*   **Argon2id Migration**: Completely removed legacy PBKDF2 support. All password hashing now uses the memory-hard Argon2id algorithm (via `hash-wasm`) for superior resistance against GPU-based cracking.
+*   **Zero-Knowledge Architecture**: Re-verified and hardened the end-to-end encryption pipeline. The server never sees plaintext data or decryption keys.
+*   **Dependency Updates**: Updated `express-rate-limit` and `flatted` to patch known vulnerabilities and improve stability.
+*   **Strict CSP**: Hardened Content Security Policy to prevent XSS and data exfiltration.
+
+### Features
+*   **Proof of Work (PoW)**: Implemented a cryptographic Hashcash-style PoW system to prevent automated spam and DoS attacks during secret creation.
+*   **Atomic Transactions**: Improved SQLite database operations with `IMMEDIATE` transactions to completely eliminate race conditions during secret access and deletion.
+*   **Mobile Sharing**: Added QR code generation for easy and secure transfer of links to mobile devices.
+
+### Documentation
+*   Consolidated and cleaned up project documentation.
+*   Added comprehensive `THREAT_MODEL.md` and `LIMITATIONS.md` to clearly define the security boundaries of the application.
+*   Updated `DEPLOYMENT.md` with Docker and Cloud Run instructions.
+*   Ensured all files correctly reference the MIT License.
 
 ---
 
-### 🛠️ Key Improvements
+## v3.x.x and earlier
 
-*   **Optimized Production Build**: Refined the `Dockerfile` with multi-stage builds and `npm ci`, resulting in a significantly smaller image footprint and faster deployment cycles.
-*   **Dependency Pruning**: Removed over 5MB of unused legacy packages (including `react-markdown`, `remark-gfm`, and `cookie-parser`), reducing the attack surface and improving application startup time.
-*   **Enhanced System Monitoring**: Introduced the `npm run stats` utility, allowing administrators to securely query system health, secret counts, and logs directly from the server console without exposing an external API.
-*   **Refined Security Documentation**: Updated all technical documentation and diagrams to reflect the new streamlined architecture, ensuring clear guidance for security audits and compliance.
-*   **Mobile UI Stability**: Fixed critical layout issues in the informational modals to ensure a consistent experience across all mobile browsers and screen resolutions.
-
-### 🛡️ Security & Integrity
-*   **Web Crypto API**: Re-validated the AES-256-GCM implementation to ensure 100% client-side encryption.
-*   **Argon2id KDF**: Fully migrated from PBKDF2 to Argon2id for password hashing, aligning with OWASP 2025 recommendations.
-*   **Rate Limiting**: Fine-tuned the `express-rate-limit` configurations to better handle high-traffic scenarios while maintaining strict protection against brute-force attacks.
-
----
-*For deployment instructions, please refer to the `DEPLOYMENT.md` file.*
+*Legacy versions. Please upgrade to v4.0.0 for the latest security features and Argon2id support.*

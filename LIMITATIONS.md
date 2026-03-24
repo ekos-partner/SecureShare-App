@@ -1,46 +1,52 @@
-# ⚠️ Security Limitations & Threat Model
+# Security Limitations
 
-This document outlines the security assumptions, limitations, and intended use cases for SecureShare. **Read this before deploying.**
+SecureShare is designed to be a highly secure, zero-knowledge platform. However, no system is perfectly secure. This document outlines the known limitations and boundaries of SecureShare's security model.
 
-## ❌ What this app is NOT
-1.  **NOT a Password Manager**: Do not use this for long-term storage of credentials.
-2.  **NOT a File Storage Service**: Designed for small text secrets (max 1MB), not large files.
-3.  **NOT Anonymity Tool**: While we don't log IP addresses in the database, the server logs (Nginx/Cloud Run) might.
-4.  **NOT Quantum-Safe**: Uses AES-256-GCM and Argon2id, which are standard today but not quantum-resistant.
+## 1. Endpoint Security
 
-## 🛡️ Security Architecture
--   **Client-Side Encryption**: Data is encrypted in the browser using **AES-256-GCM** (Web Crypto API).
--   **Zero-Knowledge Server**: The server never sees the decryption key. The key is part of the URL fragment (`#key`), which is never sent to the server.
--   **Atomic Destruction**: The "burn" operation (delete after read) is performed in a single **IMMEDIATE** database transaction to prevent race conditions.
--   **Strict CSP**: Content Security Policy prevents XSS attacks.
--   **HSTS**: Forces HTTPS connections.
+SecureShare **cannot** protect your data if the device you are using is compromised.
 
-## ⚠️ Known Limitations & Risks
+*   **Keyloggers:** If a keylogger is installed on your computer or phone, it can capture the secret as you type it, before SecureShare has a chance to encrypt it.
+*   **Screen Scrapers/Malware:** Malicious software can read the contents of your screen, capturing the plaintext secret after it has been decrypted by the recipient.
+*   **Browser Extensions:** Malicious or overly permissive browser extensions can read data from the DOM (the webpage structure) or intercept network requests before encryption occurs.
 
-### 1. The "Trusting the Server" Problem (JS Integrity)
-Since this is a web application, you must trust the server to serve the correct, uncompromised JavaScript code. This is a fundamental limitation of all web-based E2EE tools.
-*   **Risk**: A compromised server could serve malicious JS that intercepts the decryption key from the URL fragment.
-*   **Mitigation**: We use a strict Content Security Policy (CSP) with nonces to prevent unauthorized script execution. However, if the server itself is compromised, the attacker can modify the legitimate JS. Users requiring absolute security should audit the source and host it on their own trusted infrastructure.
+**Mitigation:** Ensure both the sender and recipient are using trusted, malware-free devices and modern, updated web browsers.
 
-### 2. URL History & Proxies
-*   **Risk**: If a user copies the full URL (including the `#` fragment) into a tool that syncs history (e.g., browser sync), the key is stored in that history.
-*   **Mitigation**: We use `Referrer-Policy: no-referrer` to prevent the URL from leaking to external sites, but we cannot control browser history or local extensions.
+## 2. Trust in the Server Operator (Active Attacks)
 
-### 3. Ephemeral Storage
-*   **Risk**: If the server crashes or restarts (in non-persistent environments like basic Cloud Run without volumes), secrets might be lost before they are read.
-*   **Mitigation**: Use a persistent volume (SQLite file) or an external database (PostgreSQL) for critical deployments.
+While SecureShare's Zero-Knowledge architecture protects against a *passive* server compromise (e.g., someone stealing the database), it **cannot** fully protect against an *active* attacker who controls the server hosting the application.
 
-### 4. Denial of Service (DoS)
-*   **Risk**: An attacker could generate millions of secrets to fill up the disk.
-*   **Mitigation**: We implement Rate Limiting (100 creations/hour per IP), but a distributed attack could still be an issue.
+*   **Malicious JavaScript:** The server operator could modify the frontend code (the HTML/JS sent to your browser) to silently steal your plaintext secret or the decryption key *before* the encryption process happens.
+*   **Targeted Attacks:** An active attacker could serve the malicious code only to specific IP addresses or users, making detection difficult.
 
-## 🔍 Audit Recommendations Implemented
-1.  **AES-GCM**: Switched from AES-CBC to AES-GCM for authenticated encryption.
-2.  **Atomic Transactions**: Implemented `db.transaction()` for the burn logic to prevent race conditions.
-3.  **No-Referrer**: Enforced `Referrer-Policy: no-referrer`.
-4.  **Clear Warnings**: UI now explicitly warns about the risks of sharing links in public channels.
+**Mitigation:** You must trust the person or organization hosting the SecureShare instance. If you require absolute certainty, you should host your own instance of SecureShare and verify the source code.
 
-## 📝 Intended Use Case
--   Sharing a single password or API token with a colleague.
--   Sending sensitive configuration data that should self-destruct.
--   One-off secure communication where Signal/PGP is not feasible.
+## 3. Link Interception (Without Passwords)
+
+If you share a SecureShare link (which includes the `#key` fragment) over an insecure channel (e.g., unencrypted email, SMS, or a compromised chat app), anyone who intercepts that link can view the secret.
+
+*   **The Link IS the Key:** For secrets without an additional password, possessing the full URL is sufficient to decrypt the data.
+
+**Mitigation:**
+1.  Share the link over a secure, end-to-end encrypted channel (like Signal or WhatsApp).
+2.  **Always use the optional password feature** for highly sensitive information. Share the password via a *different* channel than the link (e.g., send the link via email, and the password via SMS).
+
+## 4. Technical Limits
+
+To prevent abuse and ensure system stability, SecureShare enforces the following hard limits:
+
+*   **Maximum Secret Size:** 1MB (Megabyte) of encrypted data. Attempting to encrypt larger files or text blocks will fail.
+*   **Maximum Views:** A secret can be viewed a maximum of 10 times before it is permanently deleted.
+*   **Maximum Expiration Time:** Secrets can be stored for a maximum of 7 days (168 hours). After this time, they are automatically purged from the database.
+*   **Rate Limiting:** Strict IP-based rate limits are enforced to prevent brute-force attacks and denial-of-service (DoS) attempts.
+
+## 5. Metadata
+
+While the *content* of your secret is encrypted and unreadable by the server, certain metadata is inevitably exposed:
+
+*   **Size:** The server knows the approximate size of the encrypted blob.
+*   **Timing:** The server knows when a secret was created and when it was accessed.
+*   **IP Addresses:** The server logs the IP addresses of both the creator and the viewer (though these logs may be configured to rotate or anonymize depending on the deployment).
+*   **Access Patterns:** The server knows how many times a secret has been viewed and if password attempts have failed.
+
+This metadata cannot be used to decrypt the secret, but it could potentially be used for traffic analysis.

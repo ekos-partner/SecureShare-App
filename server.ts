@@ -540,9 +540,8 @@ const startServer = async () => {
       app.set('view engine', 'html');
       app.set('views', distPath);
 
-      // app.use(express.static(process.cwd())); // Moved to top
       app.use(express.static(distPath));
-      app.get("*", (req, res) => {
+      app.get("*", globalLimiter, (req, res) => {
         res.render(path.resolve(distPath, "index.html"), { nonce: res.locals.nonce });
       });
     } else {
@@ -558,9 +557,8 @@ const startServer = async () => {
       },
       appType: "spa",
     });
-    // app.use(express.static(process.cwd())); // Moved to top
     app.use(vite.middlewares);
-    app.get('*', async (req, res, next) => {
+    app.get('*', globalLimiter, async (req, res, next) => {
       try {
         // Sanitize URL
         const url = req.path; 
