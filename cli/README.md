@@ -103,91 +103,87 @@ GOOS=darwin GOARCH=arm64 go build -o secureshare-cli-mac .
 
 ## Usage
 
-### Creating a Secret
+### 1. Configuring the Default Server URL (Recommended)
 
-There are two ways to create a secret using the CLI:
+By default, the CLI attempts to connect to a local server (`http://localhost:3000`). To avoid typing your server's address every time, set the `SECURESHARE_URL` environment variable to your instance's URL (e.g., `https://secureshare.example.com`).
 
-#### 1. Direct Argument
-Pass the secret content as a command-line argument:
-
-```bash
-# Linux/macOS
-./secureshare-cli -url https://secureshare.example.com "My secret message"
-
-# Windows
-.\secureshare-cli.exe -url https://secureshare.example.com "My secret message"
-```
-
-#### 2. Using Pipes (stdin)
-Pipe the content from another command (ideal for files or multi-line text):
-
-```bash
-# Linux/macOS
-echo "Top Secret" | ./secureshare-cli -url https://secureshare.example.com
-
-# Windows
-echo "Top Secret" | .\secureshare-cli.exe -url https://secureshare.example.com
-```
-
-Output:
-```
-https://secureshare.example.com/s/uuid-here#base64-key
-```
-
-### Retrieving a Secret
-
-You can retrieve and decrypt a secret directly in your terminal:
-
-```bash
-# Linux/macOS
-./secureshare-cli get https://secureshare.example.com/s/uuid-here#base64-key
-
-# Windows
-.\secureshare-cli.exe get https://secureshare.example.com/s/uuid-here#base64-key
-```
-
-If the secret is password-protected, the CLI will prompt you for it, or you can provide it via a flag:
-
-```bash
-./secureshare-cli get https://secureshare.example.com/s/uuid-here#base64-key -password "my-password"
-```
-
-### Help and Options
-
-For a full list of options for each command, use the `--help` flag:
-
-```bash
-./secureshare-cli create --help
-./secureshare-cli get --help
-```
-
-### Environment Variables
-
-You can set the default server URL using the `SECURESHARE_URL` environment variable to avoid passing the `-url` flag every time. This is highly recommended for production instances.
-
-**Example:**
-```bash
-# Linux/macOS
-export SECURESHARE_URL=https://secureshare.example.com
-./secureshare-cli "My secret message"
-
-# Windows (PowerShell)
+**🪟 Windows (PowerShell):**
+```powershell
 $env:SECURESHARE_URL="https://secureshare.example.com"
-.\secureshare-cli.exe "My secret message"
+```
+*(To set this permanently, add `SECURESHARE_URL` to your system Environment Variables).*
+
+**🍎 macOS / 🐧 Linux:**
+```bash
+export SECURESHARE_URL="https://secureshare.example.com"
+```
+*(To set this permanently, add the line above to your `~/.bashrc` or `~/.zshrc` file).*
+
+---
+
+### 2. Creating a Secret (Generating a Secure Link)
+
+You can pass your secret directly as an argument in quotes, or use pipes (`|`), which is ideal for encrypting and sending the contents of entire files.
+
+*Note: The examples below assume you have set the `SECURESHARE_URL` environment variable. If not, you must add the `-url https://secureshare.example.com` flag to each command.*
+
+**🪟 Windows:**
+```powershell
+# Direct argument:
+.\secureshare-cli.exe "My secret password is: SuperSecret123!"
+
+# Using pipes (e.g., sending file contents):
+Get-Content secret_file.txt | .\secureshare-cli.exe
 ```
 
-> **Tip**: Always use the full URL including `https://` for secure production environments.
-
-### Options (for Creation)
-
--   `-url`: URL of the SecureShare instance (default: `http://localhost:3000`).
--   `-expire`: Expiration time in hours (default: 24).
--   `-views`: View limit (default: 1).
--   `-password`: Optional password for extra protection.
-
-Example:
+**🍎 macOS / 🐧 Linux:**
 ```bash
-./secureshare-cli -url https://secureshare.example.com -expire 1 -views 1 -password "correct-horse-battery-staple" "Top Secret"
+# Direct argument:
+./secureshare-cli "My secret password is: SuperSecret123!"
+
+# Using pipes (e.g., sending file contents):
+cat secret_file.txt | ./secureshare-cli
+```
+
+**Expected Output:**
+The program will generate and return a ready-to-use, secure link:
+`https://secureshare.example.com/s/12345678-abcd-efgh-ijkl-1234567890ab#Base64EncryptionKeyHere`
+
+---
+
+### 3. Retrieving and Decrypting a Secret
+
+To read and decrypt a secret directly in your terminal without opening a browser, use the `get` command and paste the full link. **Always wrap the link in quotes** so your terminal correctly interprets the `#` character.
+
+**🪟 Windows:**
+```powershell
+.\secureshare-cli.exe get "https://secureshare.example.com/s/12345678-abcd-efgh-ijkl-1234567890ab#Base64EncryptionKeyHere"
+```
+
+**🍎 macOS / 🐧 Linux:**
+```bash
+./secureshare-cli get "https://secureshare.example.com/s/12345678-abcd-efgh-ijkl-1234567890ab#Base64EncryptionKeyHere"
+```
+
+---
+
+### 4. Advanced Options
+
+When creating a secret, you can use additional flags to precisely control its parameters:
+
+- `-password "YourPassword"` – Sets an additional password required for decryption (protects against link interception).
+- `-views 5` – Sets the maximum number of views (default: 1).
+- `-expire 24` – Sets the expiration time in hours (default: 24).
+- `-url "..."` – Manually specify the server URL if the environment variable is not set.
+
+**Example using flags (macOS/Linux):**
+```bash
+./secureshare-cli -expire 2 -views 1 -password "RequiredPassword123" "Very secret data"
+```
+
+**Example with manual URL (Windows):**
+```powershell
+.\secureshare-cli.exe -url "https://secureshare.example.com" -password "MyPassword" "Secret text"
 ```
 
 ## Security Note

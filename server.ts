@@ -187,7 +187,7 @@ function handleViewLimit(db: Database.Database, secret: any) {
 }
 
 const app = express();
-app.set('trust proxy', true); // Trust all proxies (Cloudflare, Cloud Run, Nginx, etc.) to get the real client IP
+app.set('trust proxy', 1); // Trust the first proxy (Cloud Run load balancer) to get the real client IP
 const PORT = Number.parseInt(process.env.PORT || "3000", 10);
 
 // Generate a nonce for each request
@@ -252,12 +252,6 @@ const globalLimiter = rateLimit({
   max: 3000, // Increased limit to prevent false positives with static assets
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => {
-    // Fallback to x-forwarded-for if req.ip is somehow undefined or shared
-    const forwarded = req.headers['x-forwarded-for'];
-    const ip = typeof forwarded === 'string' ? forwarded.split(',')[0].trim() : req.ip;
-    return ip || 'unknown';
-  },
   message: { error: "Too many requests from this IP, please try again later." }
 });
 app.use('/api', globalLimiter);
@@ -267,11 +261,6 @@ const createLimiter = rateLimit({
   max: 200, // Increased limit for secret creation
   standardHeaders: true,
   legacyHeaders: false,
-  keyGenerator: (req) => {
-    const forwarded = req.headers['x-forwarded-for'];
-    const ip = typeof forwarded === 'string' ? forwarded.split(',')[0].trim() : req.ip;
-    return ip || 'unknown';
-  },
   message: { error: "Creation limit reached. Please try again later." }
 });
 
@@ -281,11 +270,6 @@ const authLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skipSuccessfulRequests: true,
-  keyGenerator: (req) => {
-    const forwarded = req.headers['x-forwarded-for'];
-    const ip = typeof forwarded === 'string' ? forwarded.split(',')[0].trim() : req.ip;
-    return ip || 'unknown';
-  },
   message: { error: "Too many failed attempts. Please wait 15 minutes." }
 });
 
