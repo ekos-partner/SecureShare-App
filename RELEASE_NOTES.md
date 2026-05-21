@@ -1,6 +1,36 @@
 # Release Notes
 
-## v4.0.1 (Current)
+## v4.1.0 (Current)
+
+### Features
+*   **Pluggable database layer**: New `database-provider.ts` with `IDatabaseProvider`, supporting **SQLite** (default, self-hosted) and **Firestore** (serverless / Cloud Run).
+*   **Auto provider selection**: Uses Firestore when a valid `firebase-applet-config.json` is present or `DATABASE_PROVIDER=firestore`; otherwise SQLite. Placeholder values in config are ignored and the app safely falls back to SQLite.
+*   **Firebase deployment artifacts**: `firebase-blueprint.json` and `firestore.rules` for Cloud Firestore setups.
+*   **GCS FUSE mirroring**: SQLite provider can sync the local DB to a GCS-mounted path in container environments.
+
+### Improvements
+*   **Server refactor**: `server.ts` simplified around the database provider abstraction.
+*   **Reverse proxy**: `trust proxy` enabled; rate limiters use default IP-based keying behind load balancers.
+*   **SEO**: Enhanced `index.html` metadata (robots, canonical, JSON-LD).
+*   **CLI documentation**: Reworked `cli/README.md` with clearer usage and `SECURESHARE_URL` examples.
+
+### Security
+*   **Firebase config out of Git**: `firebase-applet-config.json` is gitignored; credentials must stay local.
+*   **Dependency updates**: Security patches including `uuid` 14, `ejs` 5, `vite`, `happy-dom`, `express-rate-limit`, and others.
+
+### Infrastructure
+*   **Dockerfile restored**: Multi-stage Docker build for self-hosted deployments (`docker compose up`, `docker build`).
+
+### CLI Binaries (unchanged from v4.0.1)
+Pre-built CLI binaries are attached to this release:
+*   `secureshare-cli-linux`
+*   `secureshare-cli-mac-arm64`
+*   `secureshare-cli-mac-intel`
+*   `secureshare-cli.exe`
+
+---
+
+## v4.0.1
 
 ### Auditor Improvements & Security Fixes
 *   **Build Consistency**: Synchronized `package-lock.json` with `package.json` overrides to ensure deterministic and secure builds across Docker (`npm ci`) and local environments (`npm install`).
