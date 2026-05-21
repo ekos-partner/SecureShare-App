@@ -36,7 +36,7 @@ All encryption and decryption happen exclusively in the user's browser.
 To ensure high availability and prevent automated abuse, SecureShare implements a robust, cryptographic Proof of Work (PoW) system.
 - **Hashcash Implementation**: Every secret creation request requires the client to solve a computationally expensive SHA-256 challenge.
 - **Dynamic Difficulty**: The challenge difficulty is dynamically adjusted by the server.
-- **Replay Protection**: A server-side SQLite nonce tracking system guarantees that a PoW solution can only be used exactly once.
+- **Replay Protection**: A server-side nonce store (SQLite or Firestore, depending on deployment) guarantees that a PoW solution can only be used exactly once.
 - **Strict Expiry**: Challenges are cryptographically salted with a timestamp and expire strictly after 10 minutes, preventing pre-computation attacks.
 
 #### 3. Strong Key Derivation (KDF)
@@ -51,11 +51,25 @@ When an optional access password is set, we don't use it directly as a key.
 To prevent automated guessing and unauthorized access:
 - **Auto-Destruction**: A secret is **permanently deleted** from the database after 3 failed password attempts.
 - **Rate Limiting**: Strict IP-based and global rate limits are enforced on all server endpoints.
-- **Atomic Transactions**: Database reads and deletions are wrapped in strict `IMMEDIATE` SQLite transactions, completely eliminating race conditions (e.g., two people clicking a one-time link simultaneously).
+- **Atomic Operations**: Secret reads, view-count updates, and deletions are atomic at the storage layer (SQLite `IMMEDIATE` transactions or Firestore transactions), eliminating race conditions when two recipients open a one-time link at the same time.
+
+### 🗄️ Storage Backends
+
+SecureShare uses a **pluggable database layer** (`database-provider.ts`). The same application code runs against different backends depending on how you deploy it:
+
+| Backend | Best for | How it is selected |
+| :--- | :--- | :--- |
+| **SQLite** (default) | Self-hosted, Docker, VPS, local dev | No Firebase config, or `DATABASE_PROVIDER=sqlite` |
+| **Cloud Firestore** | Serverless (e.g. GCP Cloud Run), multi-instance without shared disk | Valid `firebase-applet-config.json` (real `projectId` / `apiKey`, no placeholders), or `DATABASE_PROVIDER=firestore` |
+
+- **SQLite**: Stores encrypted blobs in `data/secrets.db` (configurable via `DB_PATH`). In containers with a GCS FUSE mount, the provider can mirror the DB file to persistent cloud storage.
+- **Firestore**: Stores secrets in a Firestore database; deploy with `firebase-blueprint.json` and `firestore.rules`. Keep `firebase-applet-config.json` **local only** (gitignored) — never commit it.
+
+See [DEPLOYMENT.md](./DEPLOYMENT.md) for Docker and Cloud Run setup details.
 
 ### 🏛️ Architecture
 
-The application is designed with a security-first, zero-knowledge architecture.
+The application is designed with a security-first, zero-knowledge architecture. Storage is abstracted behind a single provider interface; only the backend changes between deployments.
 
 ```mermaid
 graph TD
@@ -66,12 +80,15 @@ graph TD
     end
 
     subgraph "SecureShare Server (Node.js + Express)"
-        E[Secure Server] --> F[(SQLite Database)];
+        E[Express Server] --> P[Database Provider];
+        P -->|default / sqlite| F[(SQLite)];
+        P -->|firebase config / firestore| G[(Cloud Firestore)];
     end
 
     D -->|2. Send Blob to Server| E;
-    E -->|3. Store Blob & Return ID| F;
+    E -->|3. Store Blob & Return ID| P;
     F -->|4. Returns Secret ID| E;
+    G -->|4. Returns Secret ID| E;
     E -->|5. Send ID to Browser| A;
 
     subgraph "Link Generation"
@@ -84,15 +101,20 @@ graph TD
 
     subgraph "Recipient's Browser (Client-Side)"
         K -- "6. Fetches Blob by ID" --> E;
-        E --> F;
+        E --> P;
+        P --> F;
+        P --> G;
         F --> E;
+        G --> E;
         E --> L(Encrypted Data Blob);
         K -- "7. Key is in URL Fragment (#)" --> M{Web Crypto API};
         L --> M;
         M -->|8. Decrypts Locally| N[Secret Revealed];
     end
 
+    style P fill:#e8f4fc,stroke:#333,stroke-width:2px
     style F fill:#f9f,stroke:#333,stroke-width:2px
+    style G fill:#fef3e8,stroke:#333,stroke-width:2px
 ```
 
 ## 🚀 Deployment
@@ -109,7 +131,7 @@ The recommended way to run SecureShare on **any system** is using **Docker Compo
 docker compose up -d
 ```
 
-> **Tip**: Docker will automatically create a `data` folder in your current directory to store the encrypted database.
+> **Tip**: With the default **SQLite** backend, Docker creates a `data` folder for `secrets.db`. For **Firestore**, mount or supply `firebase-applet-config.json` instead of relying on local disk persistence.
 
 #### Manual Docker Commands
 
@@ -156,7 +178,7 @@ SecureShare offers two ways to interact with the system, each designed for diffe
 ## 🛡️ Security Features Overview
 -   **AES-256-GCM Encryption**: Authenticated encryption using the native Web Crypto API.
 -   **Cryptographic Proof of Work (PoW)**: Hashcash-style Anti-DoS protection with replay prevention and strict TTL.
--   **Atomic Transactions**: Prevents race conditions during secret destruction using SQLite `IMMEDIATE` locks.
+-   **Atomic Storage Operations**: Prevents race conditions during secret access and destruction (SQLite `IMMEDIATE` transactions or Firestore transactions).
 -   **Zero-Knowledge Architecture**: The server never sees the decryption key or plaintext data.
 
 ## 🛡️ Security by Design
@@ -173,7 +195,7 @@ A command-line interface (CLI) is provided for easy terminal-based sharing.
 ## 🛠️ Technology Stack
 - **Frontend**: React 19, Tailwind CSS 4, Motion.
 - **Backend**: Node.js (Express) with `helmet` and `express-rate-limit`.
-- **Database**: SQLite with indexed TTL (Time-To-Live) for high-performance automated cleanup.
+- **Database**: Pluggable — **SQLite** (default, self-hosted) or **Cloud Firestore** (serverless); selected via `database-provider.ts`, `DATABASE_PROVIDER`, or `firebase-applet-config.json`.
 - **Encryption**: Web Crypto API (AES-256-GCM, SHA-256) and hash-wasm (Argon2id).
 
 ## 📋 Compliance & Standards
