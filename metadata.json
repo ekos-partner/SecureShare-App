@@ -1,5 +1,6 @@
 {
   "name": "SecureShare",
   "description": "Secure, end-to-end encrypted one-time secret sharing.",
-  "requestFramePermissions": []
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

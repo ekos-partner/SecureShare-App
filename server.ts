@@ -7,112 +7,22 @@
  * SECURITY ARCHITECTURE:
  * 1. Zero-Knowledge: The server never sees decryption keys or plaintext data.
  * 2. Defense in Depth: Multiple layers of protection (CSP, HSTS, Rate Limiting, PoW).
- * 3. Atomic Operations: SQLite transactions prevent race conditions in "burn-after-reading" logic.
+ * 3. Atomic Operations: Pluggable database drivers (SQLite/Firestore) guarantee safety.
  */
 
 import express from "express";
-import Database from "better-sqlite3";
 import { v4 as uuidv4 } from "uuid";
 import path from "node:path";
 import fs from "node:fs";
-import os from "node:os";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import cors from "cors";
 import { z } from "zod";
-import crypto from 'node:crypto';
-import ejs from 'ejs';
+import crypto from "node:crypto";
+import ejs from "ejs";
 
-/**
- * DATABASE INITIALIZATION
- * We use SQLite for lightweight, persistent storage.
- * The database stores encrypted blobs (AES-GCM ciphertext), expiration dates, and view limits.
- * 
- * NOTE: In production (Cloud Run/Azure), use a persistent volume for 'secrets.db' 
- * to avoid data loss on container restarts.
- */
-const getDatabase = () => {
-  // In production environments like Cloud Run, we prefer a path that might be mapped to a volume
-  // or at least a consistent location.
-  const dbPath = process.env.DB_PATH || path.join(process.cwd(), "data", "secrets.db");
-  
-  // Ensure the directory exists
-  const dbDir = path.dirname(dbPath);
-  if (!fs.existsSync(dbDir)) {
-    try {
-      fs.mkdirSync(dbDir, { recursive: true });
-    } catch {
-      console.warn(`Failed to create directory ${dbDir}, falling back to temp storage`);
-    }
-  }
-
-  try {
-    return new Database(dbPath);
-  } catch {
-    // Fallback to a secure temporary directory for environments with read-only filesystems
-    try {
-      const tmpDbPath = path.join(os.tmpdir(), 'secureshare-secrets.db');
-      console.warn(`Failed to open database at ${dbPath}, using temporary database at ${tmpDbPath}. DATA WILL BE LOST ON RESTART.`);
-      return new Database(tmpDbPath);
-    } catch (error) {
-      console.error('Failed to create temporary database:', error);
-      throw new Error(`Could not open database at ${dbPath} and failed to create fallback.`);
-    }
-  }
-};
-
-const db = getDatabase();
-
-/**
- * SCHEMA DEFINITION
- * - encrypted_data: The AES-encrypted payload (client-side encrypted).
- * - password_hash: SHA-256 hash of the user password + salt (optional).
- * - salt: Random salt used for password hashing (optional).
- * - view_limit: Max number of times the secret can be opened.
- * - failed_attempts: Counter for brute-force protection on password-protected secrets.
- * - kdf_config: JSON string containing Argon2id parameters (memory, iterations, parallelism).
- */
-db.exec(`
-  CREATE TABLE IF NOT EXISTS secrets (
-    id TEXT PRIMARY KEY,
-    encrypted_data TEXT NOT NULL,
-    password_hash TEXT,
-    salt TEXT,
-    expires_at DATETIME NOT NULL,
-    view_limit INTEGER DEFAULT 1,
-    view_count INTEGER DEFAULT 0,
-    failed_attempts INTEGER DEFAULT 0,
-    kdf_config TEXT,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  )
-`);
-
-db.exec(`
-  CREATE TABLE IF NOT EXISTS pow_nonces (
-    id TEXT PRIMARY KEY,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  )
-`);
-
-// Add index for TTL cleanup performance
-db.exec(`CREATE INDEX IF NOT EXISTS idx_secrets_expires_at ON secrets (expires_at)`);
-
-// Apply migrations for older database versions
-    try {
-      db.exec("ALTER TABLE secrets ADD COLUMN salt TEXT"); 
-    } catch { 
-      // ignore 
-    }
-    try { 
-      db.exec("ALTER TABLE secrets ADD COLUMN failed_attempts INTEGER DEFAULT 0"); 
-    } catch { 
-      // ignore 
-    }
-    try {
-      db.exec("ALTER TABLE secrets ADD COLUMN kdf_config TEXT");
-    } catch {
-      // ignore
-    }
+// Universal database provider importing (SQLite fallback + Cloud Firestore)
+import { db, IDatabaseProvider, SecretRow } from "./database-provider.js";
 
 /**
  * INPUT VALIDATION
@@ -138,8 +48,11 @@ const BurnSecretSchema = z.object({
  * Extracted to reduce cognitive complexity.
  * Returns null if verification passes, or an error object if it fails.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function verifyPasswordAndHandleBruteForce(db: Database.Database, secret: any, passwordHash: string | null | undefined) {
+async function verifyPasswordAndHandleBruteForce(
+  database: IDatabaseProvider,
+  secret: SecretRow,
+  passwordHash: string | null | undefined
+) {
   if (!secret.password_hash) return null;
 
   if (!passwordHash || passwordHash !== secret.password_hash) {
@@ -147,17 +60,22 @@ function verifyPasswordAndHandleBruteForce(db: Database.Database, secret: any, p
     const MAX_ATTEMPTS = 3;
 
     if (newFailedAttempts >= MAX_ATTEMPTS) {
-      db.prepare("DELETE FROM secrets WHERE id = ?").run(secret.id);
-      logEvent("SECRET_DELETED", `ID: ${secret.id} (Brute force protection)`);
+      await database.deleteSecret(secret.id);
+      await database.logEvent("SECRET_DELETED", `ID: ${secret.id} (Brute force protection)`);
       console.log(`[Security] Secret ${secret.id} burned after ${MAX_ATTEMPTS} failed attempts.`);
-      return { status: 401, body: { error: "Too many failed attempts. Secret has been permanently deleted." } };
+      return {
+        status: 401,
+        body: { error: "Too many failed attempts. Secret has been permanently deleted." },
+      };
     }
 
-    db.prepare("UPDATE secrets SET failed_attempts = ? WHERE id = ?").run(newFailedAttempts, secret.id);
-    logEvent("FAILED_ATTEMPT", `ID: ${secret.id}, Attempt: ${newFailedAttempts}`);
-    return { 
-      status: 401, 
-      body: { error: `Invalid password. ${MAX_ATTEMPTS - newFailedAttempts} attempts remaining before permanent deletion.` } 
+    await database.incrementFailedAttempts(secret.id, newFailedAttempts);
+    await database.logEvent("FAILED_ATTEMPT", `ID: ${secret.id}, Attempt: ${newFailedAttempts}`);
+    return {
+      status: 401,
+      body: {
+        error: `Invalid password. ${MAX_ATTEMPTS - newFailedAttempts} attempts remaining before permanent deletion.`,
+      },
     };
   }
 
@@ -168,31 +86,43 @@ function verifyPasswordAndHandleBruteForce(db: Database.Database, secret: any, p
  * VIEW LIMIT LOGIC
  * Extracted to reduce cognitive complexity.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function handleViewLimit(db: Database.Database, secret: any) {
+async function handleViewLimit(database: IDatabaseProvider, secret: SecretRow) {
   const newCount = secret.view_count + 1;
   const isBurned = newCount >= secret.view_limit;
   const remaining = Math.max(0, secret.view_limit - newCount);
 
   if (isBurned) {
-    db.prepare("DELETE FROM secrets WHERE id = ?").run(secret.id);
-    logEvent("SECRET_DELETED", `ID: ${secret.id} (View limit reached)`);
+    await database.deleteSecret(secret.id);
+    await database.logEvent("SECRET_DELETED", `ID: ${secret.id} (View limit reached)`);
     console.log(`[ViewLimit] Secret ${secret.id} deleted after reaching view limit (${secret.view_limit}).`);
   } else {
-    db.prepare("UPDATE secrets SET view_count = ? WHERE id = ?").run(newCount, secret.id);
-    logEvent("SECRET_VIEWED", `ID: ${secret.id}`);
+    await database.incrementViewCount(secret.id, newCount);
+    await database.logEvent("SECRET_VIEWED", `ID: ${secret.id}`);
   }
 
   return { success: true, burned: isBurned, remaining };
 }
 
+// Parse trust proxy configuration for both cloud environment and multiple self-hosted setups
+const getTrustProxySetting = () => {
+  const tp = process.env.TRUST_PROXY;
+  if (tp === undefined) {
+    return 1; // Default to 1 (safe for single-hop proxy deployments like Cloud Run)
+  }
+  if (tp === "true") return true;
+  if (tp === "false") return false;
+  const num = Number.parseInt(tp, 10);
+  if (!Number.isNaN(num)) return num;
+  return tp; // E.g., 'loopback', comma-separated IPs, etc.
+};
+
 const app = express();
-app.set('trust proxy', 1); // Trust the first proxy (Cloud Run load balancer) to get the real client IP
+app.set("trust proxy", getTrustProxySetting());
 const PORT = Number.parseInt(process.env.PORT || "3000", 10);
 
 // Generate a nonce for each request
 app.use((req, res, next) => {
-  res.locals.nonce = crypto.randomBytes(16).toString('hex');
+  res.locals.nonce = crypto.randomBytes(16).toString("hex");
   next();
 });
 
@@ -201,48 +131,65 @@ app.use((req, res, next) => {
  * Strict security headers for the standalone production environment.
  */
 if (process.env.NODE_ENV === "production") {
-  app.use(helmet({
-    contentSecurityPolicy: {
-      directives: {
-        defaultSrc: ["'self'"],
-        scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", (req, res) => `'nonce-${(res as express.Response).locals.nonce}'`],
-        // Allow inline styles for React/Motion
-        styleSrc: ["'self'", "'unsafe-inline'", (req, res) => `'nonce-${(res as express.Response).locals.nonce}'`, "https://fonts.googleapis.com"],
-        fontSrc: ["'self'", "https://fonts.gstatic.com"],
-        imgSrc: ["'self'", "data:", "https://picsum.photos", "blob:"],
-        // Restrict connectSrc
-        connectSrc: ["'self'"],
-        frameAncestors: ["'self'", "https://*.google.com", "https://*.run.app"],
+  app.use(
+    helmet({
+      contentSecurityPolicy: {
+        directives: {
+          defaultSrc: ["'self'"],
+          scriptSrc: [
+            "'self'",
+            "'unsafe-inline'",
+            "'unsafe-eval'",
+            (req, res) => `'nonce-${(res as express.Response).locals.nonce}'`,
+          ],
+          // Allow inline styles for React/Motion
+          styleSrc: [
+            "'self'",
+            "'unsafe-inline'",
+            (req, res) => `'nonce-${(res as express.Response).locals.nonce}'`,
+            "https://fonts.googleapis.com",
+          ],
+          fontSrc: ["'self'", "https://fonts.gstatic.com"],
+          imgSrc: ["'self'", "data:", "https://picsum.photos", "blob:"],
+          // Restrict connectSrc
+          connectSrc: ["'self'"],
+          frameAncestors: ["'self'", "https://*.google.com", "https://*.run.app"],
+        },
       },
-    },
-    hsts: {
-      maxAge: 31536000,
-      includeSubDomains: true,
-      preload: true,
-    },
-    referrerPolicy: { policy: "no-referrer" },
-    noSniff: true,
-    crossOriginEmbedderPolicy: false,
-    frameguard: { action: "sameorigin" },
-  }));
+      hsts: {
+        maxAge: 31536000,
+        includeSubDomains: true,
+        preload: true,
+      },
+      referrerPolicy: { policy: "no-referrer" },
+      noSniff: true,
+      crossOriginEmbedderPolicy: false,
+      frameguard: { action: "sameorigin" },
+    })
+  );
 
   // Add the Permissions-Policy header manually
   app.use((req, res, next) => {
-    res.setHeader('Permissions-Policy', 'accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()');
+    res.setHeader(
+      "Permissions-Policy",
+      "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()"
+    );
     next();
   });
 }
 
 // CORS Configuration
-const allowedOrigin = process.env.APP_URL || false; 
+const allowedOrigin = process.env.APP_URL || false;
 if (allowedOrigin) {
-  app.use(cors({
-    origin: allowedOrigin,
-    methods: ["GET", "POST"],
-    credentials: true
-  }));
+  app.use(
+    cors({
+      origin: allowedOrigin,
+      methods: ["GET", "POST"],
+      credentials: true,
+    })
+  );
 }
-app.use(express.json({ limit: '1.1mb' }));
+app.use(express.json({ limit: "1.1mb" }));
 
 /**
  * RATE LIMITING
@@ -252,16 +199,16 @@ const globalLimiter = rateLimit({
   max: 3000, // Increased limit to prevent false positives with static assets
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: "Too many requests from this IP, please try again later." }
+  message: { error: "Too many requests from this IP, please try again later." },
 });
-app.use('/api', globalLimiter);
+app.use("/api", globalLimiter);
 
 const createLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   max: 200, // Increased limit for secret creation
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: "Creation limit reached. Please try again later." }
+  message: { error: "Creation limit reached. Please try again later." },
 });
 
 const authLimiter = rateLimit({
@@ -270,39 +217,8 @@ const authLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skipSuccessfulRequests: true,
-  message: { error: "Too many failed attempts. Please wait 15 minutes." }
+  message: { error: "Too many failed attempts. Please wait 15 minutes." },
 });
-
-db.exec(`
-  CREATE TABLE IF NOT EXISTS pow_nonces (
-    id TEXT PRIMARY KEY,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-  )
-`);
-
-db.exec(`
-  CREATE TABLE IF NOT EXISTS logs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
-    event TEXT NOT NULL,
-    details TEXT
-  )
-`);
-
-function logEvent(event: string, details: string = "") {
-  try {
-    db.prepare("INSERT INTO logs (event, details) VALUES (?, ?)").run(event, details);
-    // Keep only last 1000 logs
-    db.prepare("DELETE FROM logs WHERE id NOT IN (SELECT id FROM logs ORDER BY timestamp DESC LIMIT 1000)").run();
-  } catch (err) {
-    console.error("Failed to log event:", err);
-  }
-}
-
-// Cleanup old PoW nonces every hour
-setInterval(() => {
-  db.prepare("DELETE FROM pow_nonces WHERE created_at < datetime('now', '-10 minutes')").run();
-}, 3600000);
 
 // Rate limiting configurations
 const POW_DIFFICULTY = 18; // ~250ms-500ms on modern CPUs. Adjust as needed.
@@ -310,63 +226,72 @@ const POW_DIFFICULTY = 18; // ~250ms-500ms on modern CPUs. Adjust as needed.
 /**
  * PROOF OF WORK (HASHCASH) VALIDATION
  */
-function verifyPoW(resource: string, salt: string, nonce: string, difficulty: number): boolean {
+async function verifyPoW(
+  database: IDatabaseProvider,
+  resource: string,
+  salt: string,
+  nonce: string,
+  difficulty: number
+): Promise<boolean> {
   // 1. Validate Time-To-Live (TTL) to prevent pre-computation attacks
-  const parts = salt.split('_');
+  const parts = salt.split("_");
   if (parts.length !== 2) return false;
   const timestamp = parseInt(parts[0], 10);
   const now = Date.now();
   if (isNaN(timestamp) || now - timestamp > 600000) return false; // Strict 10-minute expiry
 
-  // 2. Enforce Replay Protection via SQLite Unique Constraint
+  // 2. Enforce Replay Protection via atomic Database constraint
   const powId = `${salt}:${nonce}`;
-  try {
-    db.prepare("INSERT INTO pow_nonces (id) VALUES (?)").run(powId);
-  } catch {
-    return false; // Constraint violation: This exact PoW solution has already been used.
+  const isRegistered = await database.registerPoWNonce(powId);
+  if (!isRegistered) {
+    return false; // Replay detected!
   }
 
   // 3. Cryptographic Hash Verification
   const header = `1:${difficulty}:${resource}:${salt}:${nonce}`;
-  const hash = crypto.createHash('sha256').update(header).digest('hex');
-  
+  const hash = crypto.createHash("sha256").update(header).digest("hex");
+
   const hexToBinary = (hex: string) => {
-    return hex.split('').map(h => parseInt(h, 16).toString(2).padStart(4, '0')).join('');
+    return hex
+      .split("")
+      .map((h) => parseInt(h, 16).toString(2).padStart(4, "0"))
+      .join("");
   };
-  
+
   const binaryHash = hexToBinary(hash);
-  return binaryHash.startsWith('0'.repeat(difficulty));
+  return binaryHash.startsWith("0".repeat(difficulty));
 }
 
 /**
  * API ENDPOINTS
  */
 
-// Create a new secret
+// Health verification
 app.get("/api/health", (req, res) => {
-  res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+  res.status(200).json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
 // Get PoW Challenge
 app.get("/api/pow/challenge", (req, res) => {
-  const salt = `${Date.now()}_${crypto.randomBytes(8).toString('hex')}`;
+  const salt = `${Date.now()}_${crypto.randomBytes(8).toString("hex")}`;
   res.json({
-    resource: 'secureshare',
+    resource: "secureshare",
     salt,
     difficulty: POW_DIFFICULTY,
-    timestamp: Date.now()
+    timestamp: Date.now(),
   });
 });
 
-app.post("/api/secrets", createLimiter, (req, res) => {
+// Create a new secret
+app.post("/api/secrets", createLimiter, async (req, res) => {
   const { powNonce, powSalt } = req.body;
 
   // Verify Proof of Work
-  if (process.env.NODE_ENV === 'production' || req.headers['x-enforce-pow']) {
-    if (!powNonce || !powSalt || !verifyPoW('secureshare', powSalt, powNonce, POW_DIFFICULTY)) {
-      return res.status(402).json({ 
+  if (process.env.NODE_ENV === "production" || req.headers["x-enforce-pow"]) {
+    if (!powNonce || !powSalt || !(await verifyPoW(db, "secureshare", powSalt, powNonce, POW_DIFFICULTY))) {
+      return res.status(402).json({
         error: "Proof of Work required. Solve challenge first.",
-        challenge_url: "/api/pow/challenge"
+        challenge_url: "/api/pow/challenge",
       });
     }
   }
@@ -377,7 +302,7 @@ app.post("/api/secrets", createLimiter, (req, res) => {
   }
 
   const { encryptedData, passwordHash, salt, expirationHours, viewLimit, kdfConfig } = result.data;
-  
+
   // Enforce limits
   if (expirationHours < 1 || expirationHours > 168) {
     return res.status(400).json({ error: "Expiration must be between 1 and 168 hours" });
@@ -390,12 +315,17 @@ app.post("/api/secrets", createLimiter, (req, res) => {
   const expiresAt = new Date(Date.now() + expirationHours * 60 * 60 * 1000).toISOString();
 
   try {
-    const stmt = db.prepare(`
-      INSERT INTO secrets (id, encrypted_data, password_hash, salt, expires_at, view_limit, kdf_config)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `);
-    stmt.run(id, encryptedData, passwordHash || null, salt || null, expiresAt, viewLimit, kdfConfig || null);
-    logEvent("SECRET_CREATED", `ID: ${id}, Expires: ${expiresAt}`);
+    await db.createSecret({
+      id,
+      encryptedData,
+      passwordHash: passwordHash || null,
+      salt: salt || null,
+      expiresAt,
+      viewLimit,
+      kdfConfig: kdfConfig || null,
+    });
+    await db.logEvent("SECRET_CREATED", `ID: ${id}, Expires: ${expiresAt}`);
+
     res.json({ id });
   } catch (error) {
     console.error("Database error:", error);
@@ -404,26 +334,16 @@ app.post("/api/secrets", createLimiter, (req, res) => {
 });
 
 // Fetch secret metadata (encrypted blob + salt)
-app.get("/api/secrets/:id", (req, res) => {
+app.get("/api/secrets/:id", async (req, res) => {
   const { id } = req.params;
-  
+
   try {
-    const secret = db.prepare("SELECT * FROM secrets WHERE id = ?").get(id) as { 
-    id: string;
-    encrypted_data: string;
-    password_hash: string | null;
-    salt: string | null;
-    kdf_config: string | null;
-    expires_at: string;
-    view_limit: number;
-    view_count: number;
-    failed_attempts: number;
-  } | undefined;
+    const secret = await db.getSecret(id);
 
     // Opaque response for non-existent or expired secrets to prevent enumeration
     if (!secret || new Date(secret.expires_at) < new Date()) {
       if (secret && new Date(secret.expires_at) < new Date()) {
-        db.prepare("DELETE FROM secrets WHERE id = ?").run(id);
+        await db.deleteSecret(id);
       }
       return res.status(404).json({ error: "Secret not found or expired" });
     }
@@ -432,16 +352,16 @@ app.get("/api/secrets/:id", (req, res) => {
       encryptedData: secret.encrypted_data,
       hasPassword: !!secret.password_hash,
       salt: secret.salt,
-      kdfConfig: secret.kdf_config
+      kdfConfig: secret.kdf_config,
     });
   } catch (error) {
-    console.error("Transaction error:", error);
+    console.error("Fetch secret error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 });
 
 // Verify access and "burn" the secret (increment view count or delete)
-app.post("/api/secrets/:id/burn", authLimiter, (req, res) => {
+app.post("/api/secrets/:id/burn", authLimiter, async (req, res) => {
   const { id } = req.params;
   const result = BurnSecretSchema.safeParse(req.body);
   if (!result.success) {
@@ -451,40 +371,24 @@ app.post("/api/secrets/:id/burn", authLimiter, (req, res) => {
   const { passwordHash } = result.data;
 
   try {
-    // ATOMIC TRANSACTION: Check, Verify, and Update/Delete in one go
-    // Refactored to keep cognitive complexity low (< 15)
-    // Using .immediate() to prevent race conditions in SQLite
-    const transaction = db.transaction(() => {
-      const secret = db.prepare("SELECT * FROM secrets WHERE id = ?").get(id) as { 
-        id: string;
-        encrypted_data: string;
-        password_hash: string | null;
-        salt: string | null;
-        expires_at: string;
-        view_limit: number;
-        view_count: number;
-        failed_attempts: number;
-      } | undefined;
-      
-      if (!secret) {
-        return { status: 404, body: { error: "Not found" } };
-      }
+    const secret = await db.getSecret(id);
 
-      // 1. Verify password & handle brute force
-      const authError = verifyPasswordAndHandleBruteForce(db, secret, passwordHash);
-      if (authError) return authError;
+    if (!secret) {
+      return res.status(404).json({ error: "Not found" });
+    }
 
-      // 2. Handle view limits and burning
-      const viewResult = handleViewLimit(db, secret);
+    // 1. Verify password & handle brute force
+    const authError = await verifyPasswordAndHandleBruteForce(db, secret, passwordHash);
+    if (authError) {
+      return res.status(authError.status).json(authError.body);
+    }
 
-      return { status: 200, body: viewResult };
-    });
+    // 2. Handle view limits and burning
+    const viewResult = await handleViewLimit(db, secret);
 
-    const txResult = transaction.immediate();
-    res.status(txResult.status).json(txResult.body);
-
+    res.status(200).json(viewResult);
   } catch (error) {
-    console.error("Transaction error:", error);
+    console.error("Burning secret error:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 });
@@ -493,25 +397,37 @@ app.post("/api/secrets/:id/burn", authLimiter, (req, res) => {
  * PERIODIC CLEANUP
  * Deletes expired secrets from the database every 5 minutes.
  */
-setInterval(() => {
+setInterval(async () => {
   try {
     const now = new Date().toISOString();
-    const result = db.prepare("DELETE FROM secrets WHERE expires_at < ?").run(now);
-    if (result.changes > 0) {
-      logEvent("CLEANUP", `Deleted ${result.changes} expired secrets`);
-      console.log(`[Cleanup] Deleted ${result.changes} expired secrets.`);
+    const deletedCount = await db.deleteExpiredSecrets(now);
+    if (deletedCount > 0) {
+      await db.logEvent("CLEANUP", `Deleted ${deletedCount} expired secrets`);
+      console.log(`[Backup/Cleanup] Deleted ${deletedCount} expired secrets.`);
     }
   } catch (error) {
     console.error("[Cleanup] Error cleaning up expired secrets:", error);
   }
 }, 5 * 60 * 1000);
 
+// Cleanup old PoW nonces every hour
+setInterval(async () => {
+  try {
+    await db.cleanupPoWNonces();
+  } catch (error) {
+    console.error("[Cleanup] PoW Nonce cleanup error:", error);
+  }
+}, 3600000);
+
 /**
  * STATIC FILE SERVING & VITE INTEGRATION
  */
 const startServer = async () => {
+  console.log("Initializing database connection...");
+  await db.initialize();
+
   console.log(`Starting server on port ${PORT}...`);
-  
+
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server is listening on http://0.0.0.0:${PORT}`);
   });
@@ -520,13 +436,14 @@ const startServer = async () => {
     // Production mode: Serve pre-built static files from /dist
     const distPath = path.resolve(process.cwd(), "dist");
     if (fs.existsSync(distPath)) {
-      app.engine('html', ejs.renderFile);
-      app.set('view engine', 'html');
-      app.set('views', distPath);
+      app.engine("html", ejs.renderFile);
+      app.set("view engine", "html");
+      app.set("views", distPath);
 
       app.use(express.static(distPath));
       app.get("*", globalLimiter, (req, res) => {
-        res.render(path.resolve(distPath, "index.html"), { nonce: res.locals.nonce });
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        res.render(path.resolve(distPath, "index.html"), { nonce: (res as any).locals.nonce });
       });
     } else {
       console.warn("Production build 'dist' folder not found. Static files will not be served.");
@@ -535,21 +452,24 @@ const startServer = async () => {
     // Development mode: Use Vite middleware and EJS for nonce injection
     const { createServer: createViteServer } = await import("vite");
     const vite = await createViteServer({
-      server: { 
+      server: {
         middlewareMode: true,
-        hmr: false // Disable HMR as per platform guidelines
+        hmr: false, // Disable HMR as per platform guidelines
       },
       appType: "spa",
     });
     app.use(vite.middlewares);
-    app.get('*', globalLimiter, async (req, res, next) => {
+    app.get("*", globalLimiter, async (req, res, next) => {
       try {
         // Sanitize URL
-        const url = req.path; 
-        const template = await vite.transformIndexHtml(url, fs.readFileSync(path.resolve(process.cwd(), 'index.html'), 'utf-8'));
+        const url = req.path;
+        const template = await vite.transformIndexHtml(
+          url,
+          fs.readFileSync(path.resolve(process.cwd(), "index.html"), "utf-8")
+        );
         // Inject nonce
-        const renderedHtml = template.replaceAll('<%= nonce %>', res.locals.nonce);
-        res.status(200).set({ 'Content-Type': 'text/html' }).end(renderedHtml);
+        const renderedHtml = template.replaceAll("<%= nonce %>", res.locals.nonce);
+        res.status(200).set({ "Content-Type": "text/html" }).end(renderedHtml);
       } catch (e) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         vite.ssrFixStacktrace(e as any);
@@ -565,11 +485,11 @@ Expires: ${new Date(Date.now() + 365 * 24 * 60 * 60 * 1000).toISOString()}
 Canonical: https://${req.hostname}/.well-known/security.txt
 Policy: https://${req.hostname}/security-policy
 `;
-    res.type('text/plain').send(securityTxt);
+    res.type("text/plain").send(securityTxt);
   });
 
   app.get("/security-policy", (req, res) => {
-    res.type('text/plain').send(`# Security Policy
+    res.type("text/plain").send(`# Security Policy
 
 1. Reporting
    Please report vulnerabilities via GitHub's "Report a vulnerability" feature in the Security tab.
@@ -586,8 +506,8 @@ Policy: https://${req.hostname}/security-policy
   // Global error handler
   // eslint-disable-next-line @typescript-eslint/no-explicit-any, @typescript-eslint/no-unused-vars
   app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
-    console.error('Unhandled error:', err);
-    res.status(500).send('Internal Server Error');
+    console.error("Unhandled error:", err);
+    res.status(500).send("Internal Server Error");
   });
 };
 

@@ -1,0 +1,33 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Default deny catch-all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Secrets Collection rules
+    match /secrets/{secretId} {
+      // Allow creation of correctly formatted secrets
+      allow create: if request.resource.data.encrypted_data is string
+                    && request.resource.data.encrypted_data.size() <= 1153434 // Max ~1.1MB
+                    && request.resource.data.expires_at is string;
+                    
+      // Allow querying and updating individual documents by ID
+      allow get: if true;
+      allow update: if true;
+      allow delete: if true;
+    }
+
+    // Replay attack nonces
+    match /pow_nonces/{nonceId} {
+      allow get: if true;
+      allow create: if true;
+    }
+
+    // Logs
+    match /logs/{logId} {
+      allow create: if true;
+    }
+  }
+}

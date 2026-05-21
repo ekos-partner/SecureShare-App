@@ -726,7 +726,7 @@ export default function App() {
                         <input
                           id="view-password-input"
                           type={showViewPassword ? "text" : "password"}
-                          value={viewPassword}
+                          viewValue={viewPassword}
                           onChange={(e) => setViewPassword(e.target.value)}
                           placeholder="Access password..."
                           className="w-full p-4 pr-14 rounded-2xl border border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-indigo-500 bg-white/50 dark:bg-slate-900/50 dark:text-white text-center text-lg"

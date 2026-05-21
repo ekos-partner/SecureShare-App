@@ -1,0 +1,121 @@
+{
+  "entities": {
+    "Secret": {
+      "title": "Secret",
+      "description": "Encrypted secure sharing secret blob",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier of the secret"
+        },
+        "encrypted_data": {
+          "type": "string",
+          "description": "AES-encrypted secure payload"
+        },
+        "password_hash": {
+          "type": "string",
+          "description": "SHA-256 hash of the verification password"
+        },
+        "salt": {
+          "type": "string",
+          "description": "Salt used in key/hash derivations"
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Secret expiration deadline"
+        },
+        "view_limit": {
+          "type": "integer",
+          "description": "Maximum allowed reads before burning"
+        },
+        "view_count": {
+          "type": "integer",
+          "description": "Current view counter status"
+        },
+        "failed_attempts": {
+          "type": "integer",
+          "description": "Failed authorization password submissions"
+        },
+        "kdf_config": {
+          "type": "string",
+          "description": "JSON serialized KDF configurations"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Secret creation timestamp"
+        }
+      },
+      "required": [
+        "id",
+        "encrypted_data",
+        "expires_at"
+      ]
+    },
+    "PoWNonce": {
+      "title": "PoWNonce",
+      "description": "Used nonces to block cryptographic replay loops",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Combination of salt and nonce"
+        },
+        "created_at": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation timestamp"
+        }
+      },
+      "required": [
+        "id",
+        "created_at"
+      ]
+    },
+    "Log": {
+      "title": "Log",
+      "description": "Cryptographic and session access logs",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique logging item identifier"
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation timestamp"
+        },
+        "event": {
+          "type": "string",
+          "description": "Type of access log event"
+        },
+        "details": {
+          "type": "string",
+          "description": "Associated metadata strings"
+        }
+      },
+      "required": [
+        "id",
+        "timestamp",
+        "event"
+      ]
+    }
+  },
+  "firestore": {
+    "secrets/{id}": {
+      "schema": "Secret",
+      "description": "Shared cryptographic items"
+    },
+    "pow_nonces/{id}": {
+      "schema": "PoWNonce",
+      "description": "Failsafe Proof-of-Work solution records"
+    },
+    "logs/{id}": {
+      "schema": "Log",
+      "description": "Diagnostic and security audit occurrences"
+    }
+  }
+}
