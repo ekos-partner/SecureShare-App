@@ -8,3 +8,6 @@ coverage/
 !.env.example
 secrets.db
 cli/secureshare-cli*
+
+# Firebase client config (contains apiKey) — copy from firebase-applet-config.json.example
+firebase-applet-config.json
