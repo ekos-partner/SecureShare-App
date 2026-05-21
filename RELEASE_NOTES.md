@@ -1,6 +1,8 @@
 # Release Notes
 
-## v4.1.0 (Current)
+## v4.1.1 (Current)
+
+> Tag `v4.1.0` was not published: GitHub immutable-release rules blocked re-creating that tag after a failed first release attempt.
 
 ### Features
 *   **Pluggable database layer**: New `database-provider.ts` with `IDatabaseProvider`, supporting **SQLite** (default, self-hosted) and **Firestore** (serverless / Cloud Run).
