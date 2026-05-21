@@ -438,7 +438,26 @@ export class FirestoreProvider implements IDatabaseProvider {
  */
 export function getDatabaseProvider(): IDatabaseProvider {
   const configPath = path.join(process.cwd(), "firebase-applet-config.json");
-  const hasFirebaseConfig = fs.existsSync(configPath);
+  let hasRealFirebaseConfig = false;
+
+  if (fs.existsSync(configPath)) {
+    try {
+      const configContent = fs.readFileSync(configPath, "utf-8");
+      const config = JSON.parse(configContent);
+      if (
+        config &&
+        config.projectId &&
+        !config.projectId.includes("placeholder") &&
+        config.apiKey &&
+        !config.apiKey.includes("placeholder")
+      ) {
+        hasRealFirebaseConfig = true;
+      }
+    } catch {
+      hasRealFirebaseConfig = false;
+    }
+  }
+
   const preferredProvider = process.env.DATABASE_PROVIDER;
 
   if (preferredProvider === "sqlite") {
@@ -446,11 +465,11 @@ export function getDatabaseProvider(): IDatabaseProvider {
     return new SqliteProvider();
   }
 
-  if (preferredProvider === "firestore" || (hasFirebaseConfig && preferredProvider !== "sqlite")) {
+  if (preferredProvider === "firestore" || (hasRealFirebaseConfig && preferredProvider !== "sqlite")) {
     return new FirestoreProvider();
   }
 
-  console.log("[DATABASE FACTORY] Defaulting to SQLite database provider (local filesystem).");
+  console.log("[DATABASE FACTORY] No valid Firebase configuration found or using placeholders. Safely defaulting to local SQLite database provider.");
   return new SqliteProvider();
 }
 
