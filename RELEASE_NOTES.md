@@ -1,6 +1,18 @@
 # Release Notes
 
-## v4.1.1 (Current)
+## v4.1.2 (Current)
+
+### Documentation
+*   **DEPLOYMENT.md**: Rewritten GCP section — Cloud Run + Firestore (recommended) vs SQLite + GCS volume; environment variable reference.
+*   **README.md**: Storage backends table and updated architecture diagram (database provider layer).
+*   **CONTRIBUTING.md**, **THREAT_MODEL.md**, **SECURITY.md**, **LIMITATIONS.md**, **`.env.example`**: Aligned with pluggable SQLite/Firestore storage.
+
+### Fixes
+*   **Dockerfile**: Include `database-provider.ts` in the production image (required since v4.1.x for Docker and Cloud Run builds).
+
+---
+
+## v4.1.1
 
 > Tag `v4.1.0` was not published: GitHub immutable-release rules blocked re-creating that tag after a failed first release attempt.
 

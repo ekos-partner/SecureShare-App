@@ -35,7 +35,7 @@ RUN mkdir -p /app/data && chown -R node:node /app/data
 COPY --from=builder --chown=node:node /app/dist ./dist
 COPY --from=builder --chown=node:node /app/node_modules ./node_modules
 COPY --from=builder --chown=node:node /app/package*.json ./
-COPY --from=builder --chown=node:node /app/server.ts /app/tsconfig.json /app/index.html ./
+COPY --from=builder --chown=node:node /app/server.ts /app/database-provider.ts /app/tsconfig.json /app/index.html ./
 COPY --from=builder --chown=node:node /app/src/lib ./src/lib
 COPY --from=builder --chown=node:node /app/scripts ./scripts
 

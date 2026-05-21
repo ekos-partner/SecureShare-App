@@ -49,11 +49,13 @@ This section guides you through submitting an enhancement suggestion for SecureS
 4.  Run `npm test` to run tests.
 5.  Run `npm run lint` to check for linting errors.
 
+By default, `npm run dev` uses the **SQLite** provider (`./data/secrets.db`). To test **Firestore** locally, add a valid `firebase-applet-config.json` (gitignored) or set `DATABASE_PROVIDER=firestore`. See [DEPLOYMENT.md](./DEPLOYMENT.md).
+
 ## Architecture & Tech Stack
 
 *   **Frontend**: React 19, Tailwind CSS 4, Motion.
 *   **Backend**: Node.js (Express) with `helmet` and `express-rate-limit`.
-*   **Database**: SQLite with indexed TTL (Time-To-Live).
+*   **Database**: Pluggable — **SQLite** (default) or **Cloud Firestore** via `database-provider.ts`.
 *   **Encryption**: Web Crypto API (AES-256-GCM, SHA-256) and hash-wasm (Argon2id).
 
 Please ensure any new features align with our Zero-Knowledge architecture. The server must never see plaintext data or decryption keys.

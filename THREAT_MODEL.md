@@ -26,7 +26,7 @@ SecureShare is designed to provide high-security, zero-knowledge sharing of sens
 
 ### 5. Race Conditions (Simultaneous Access)
 - **Threat**: Two users click a "one-time view" link at the exact same millisecond, potentially allowing both to read a secret meant for only one.
-- **Mitigation**: Database reads and deletions are wrapped in strict `IMMEDIATE` SQLite transactions. This guarantees atomic operations, ensuring that only the first request succeeds and subsequent requests fail.
+- **Mitigation**: Secret reads, view-count updates, and deletions are atomic at the storage layer — SQLite `IMMEDIATE` transactions or Firestore transactions — so only the first concurrent request succeeds when a one-time view is enforced.
 
 ## ⚠️ What SecureShare DOES NOT Protect Against
 

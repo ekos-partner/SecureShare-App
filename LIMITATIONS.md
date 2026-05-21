@@ -50,3 +50,11 @@ While the *content* of your secret is encrypted and unreadable by the server, ce
 *   **Access Patterns:** The server knows how many times a secret has been viewed and if password attempts have failed.
 
 This metadata cannot be used to decrypt the secret, but it could potentially be used for traffic analysis.
+
+## 6. Firestore Deployments (Operator Responsibility)
+
+If you deploy with the **Firestore** backend (typical on GCP Cloud Run):
+
+*   **`firebase-applet-config.json`** contains a Firebase Web API key. Restrict that key in Google Cloud Console (HTTP referrers, API allowlists). Never commit this file to version control.
+*   **`firestore.rules`** in this repository must be deployed to your Firebase project. Operators are responsible for reviewing rules and Firebase project access — misconfiguration can expose collections to clients that possess the Web API key.
+*   **Logs**: Firestore event logging behavior differs from SQLite; see [DEPLOYMENT.md](./DEPLOYMENT.md) for setup expectations.
