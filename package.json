@@ -20,7 +20,7 @@
     "cors": "^2.8.6",
     "dotenv": "^17.2.3",
     "ejs": "^5.0.1",
-    "express": "^4.21.2",
+    "express": "^4.22.2",
     "express-rate-limit": "^8.2.2",
     "firebase": "^12.13.0",
     "hash-wasm": "^4.12.0",
