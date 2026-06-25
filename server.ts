@@ -19,7 +19,6 @@ import rateLimit from "express-rate-limit";
 import cors from "cors";
 import { z } from "zod";
 import crypto from "node:crypto";
-import ejs from "ejs";
 
 // Universal database provider importing (SQLite fallback + Cloud Firestore)
 import { db, IDatabaseProvider, SecretRow } from "./database-provider.js";
@@ -268,7 +267,11 @@ async function verifyPoW(
 
 // Health verification
 app.get("/api/health", (req, res) => {
-  res.status(200).json({ status: "ok", timestamp: new Date().toISOString() });
+  res.status(200).json({
+    status: "ok",
+    database: db.constructor.name === "FirestoreProvider" ? "firestore" : "sqlite",
+    timestamp: new Date().toISOString()
+  });
 });
 
 // Get PoW Challenge
@@ -436,14 +439,25 @@ const startServer = async () => {
     // Production mode: Serve pre-built static files from /dist
     const distPath = path.resolve(process.cwd(), "dist");
     if (fs.existsSync(distPath)) {
-      app.engine("html", ejs.renderFile);
-      app.set("view engine", "html");
-      app.set("views", distPath);
+      app.use(express.static(distPath, { index: false }));
 
-      app.use(express.static(distPath));
+      let cachedIndexHtml: string | null = null;
+      try {
+        cachedIndexHtml = fs.readFileSync(path.resolve(distPath, "index.html"), "utf-8");
+      } catch (err) {
+        console.error("Failed to read index.html in production:", err);
+      }
+
       app.get("*", globalLimiter, (req, res) => {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        res.render(path.resolve(distPath, "index.html"), { nonce: (res as any).locals.nonce });
+        try {
+          const html = cachedIndexHtml || fs.readFileSync(path.resolve(distPath, "index.html"), "utf-8");
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const renderedHtml = html.replaceAll("<%= nonce %>", (res as any).locals.nonce);
+          res.status(200).set({ "Content-Type": "text/html" }).end(renderedHtml);
+        } catch (err) {
+          console.error("Error serving index.html:", err);
+          res.status(500).send("Internal Server Error");
+        }
       });
     } else {
       console.warn("Production build 'dist' folder not found. Static files will not be served.");

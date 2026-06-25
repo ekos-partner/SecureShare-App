@@ -9,5 +9,5 @@ coverage/
 secrets.db
 cli/secureshare-cli*
 
-# Firebase client config (contains apiKey) — copy from firebase-applet-config.json.example
+# Firebase config containing private applet secrets and keys
 firebase-applet-config.json

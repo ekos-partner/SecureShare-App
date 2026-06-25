@@ -269,6 +269,76 @@ export class SqliteProvider implements IDatabaseProvider {
 }
 
 /**
+ * HELPER TO RESOLVE FIREBASE CONFIGURATION
+ * Reads from individual environment variables, structured json environment strings, or local config file.
+ * This ensures no keys are leaked to public repositories, and enables secure Cloud Run configuration.
+ */
+export interface FirebaseConfig {
+  apiKey: string;
+  authDomain?: string;
+  projectId: string;
+  storageBucket?: string;
+  messagingSenderId?: string;
+  appId?: string;
+  firestoreDatabaseId?: string;
+}
+
+export function getFirebaseConfig(): FirebaseConfig | null {
+  // 1. Try environment variable JSON string
+  if (process.env.FIREBASE_CONFIG) {
+    try {
+      const parsed = JSON.parse(process.env.FIREBASE_CONFIG);
+      if (parsed && parsed.projectId && parsed.apiKey) {
+        return {
+          ...parsed,
+          firestoreDatabaseId: parsed.firestoreDatabaseId || "(default)",
+        };
+      }
+    } catch (e) {
+      console.warn("[DATABASE FACTORY] Failed to parse FIREBASE_CONFIG environment variable as JSON:", e);
+    }
+  }
+
+  // 2. Try individual environment variables
+  if (process.env.FIREBASE_PROJECT_ID && process.env.FIREBASE_API_KEY) {
+    return {
+      apiKey: process.env.FIREBASE_API_KEY,
+      authDomain: process.env.FIREBASE_AUTH_DOMAIN,
+      projectId: process.env.FIREBASE_PROJECT_ID,
+      storageBucket: process.env.FIREBASE_STORAGE_BUCKET,
+      messagingSenderId: process.env.FIREBASE_MESSAGING_SENDER_ID,
+      appId: process.env.FIREBASE_APP_ID,
+      firestoreDatabaseId: process.env.FIREBASE_FIRESTORE_DATABASE_ID || "(default)",
+    };
+  }
+
+  // 3. Try reading from local config file
+  const configPath = path.join(process.cwd(), "firebase-applet-config.json");
+  if (fs.existsSync(configPath)) {
+    try {
+      const configContent = fs.readFileSync(configPath, "utf-8");
+      const config = JSON.parse(configContent);
+      if (
+        config &&
+        config.projectId &&
+        !config.projectId.includes("placeholder") &&
+        config.apiKey &&
+        !config.apiKey.includes("placeholder")
+      ) {
+        return {
+          ...config,
+          firestoreDatabaseId: config.firestoreDatabaseId || "(default)",
+        };
+      }
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
+}
+
+/**
  * FIRESTORE DB PROVIDER
  * Robust, highly persistent serverless DB provider. Keeps secrets across container restarts,
  * dynamic scaling to 0, or code publishes. Extremely fast and transactional.
@@ -278,15 +348,16 @@ export class FirestoreProvider implements IDatabaseProvider {
   private firestoreDb: any;
 
   public async initialize(): Promise<void> {
-    console.log("[FIRESTORE] Cloud Firestore selected. Reading config from firebase-applet-config.json...");
+    console.log("[FIRESTORE] Initializing Cloud Firestore connection from resolved configurations...");
     try {
-      const configPath = path.join(process.cwd(), "firebase-applet-config.json");
-      const configContent = fs.readFileSync(configPath, "utf-8");
-      const firebaseConfig = JSON.parse(configContent);
+      const firebaseConfig = getFirebaseConfig();
+      if (!firebaseConfig) {
+        throw new Error("No Firestore configuration found in environment variables or configuration file.");
+      }
       
       const app = initializeApp(firebaseConfig);
       this.firestoreDb = getFirestore(app, firebaseConfig.firestoreDatabaseId);
-      console.log(`[FIRESTORE] Connected successfully to enterprise Cloud database instance: ${firebaseConfig.firestoreDatabaseId}`);
+      console.log(`[FIRESTORE] Connected successfully to enterprise Cloud database instance: ${firebaseConfig.firestoreDatabaseId || "(default)"}`);
     } catch (err) {
       console.error("[FIRESTORE CRITICAL ERROR] Failed to connect server side to Firestore database:", err);
       throw err;
@@ -434,30 +505,9 @@ export class FirestoreProvider implements IDatabaseProvider {
 /**
  * DATABASE FACTORY / RESOLVER
  * Auto-resolves whether to leverage Cloud Firestore or SQLite.
- * Detects presence of firebase-applet-config.json configuration file.
+ * Detects presence of firebase-applet-config.json configuration file or environment variables.
  */
 export function getDatabaseProvider(): IDatabaseProvider {
-  const configPath = path.join(process.cwd(), "firebase-applet-config.json");
-  let hasRealFirebaseConfig = false;
-
-  if (fs.existsSync(configPath)) {
-    try {
-      const configContent = fs.readFileSync(configPath, "utf-8");
-      const config = JSON.parse(configContent);
-      if (
-        config &&
-        config.projectId &&
-        !config.projectId.includes("placeholder") &&
-        config.apiKey &&
-        !config.apiKey.includes("placeholder")
-      ) {
-        hasRealFirebaseConfig = true;
-      }
-    } catch {
-      hasRealFirebaseConfig = false;
-    }
-  }
-
   const preferredProvider = process.env.DATABASE_PROVIDER;
 
   if (preferredProvider === "sqlite") {
@@ -465,11 +515,13 @@ export function getDatabaseProvider(): IDatabaseProvider {
     return new SqliteProvider();
   }
 
-  if (preferredProvider === "firestore" || (hasRealFirebaseConfig && preferredProvider !== "sqlite")) {
+  const firebaseConfig = getFirebaseConfig();
+
+  if (preferredProvider === "firestore" || (firebaseConfig && preferredProvider !== "sqlite")) {
     return new FirestoreProvider();
   }
 
-  console.log("[DATABASE FACTORY] No valid Firebase configuration found or using placeholders. Safely defaulting to local SQLite database provider.");
+  console.log("[DATABASE FACTORY] No valid Firebase configuration found in environment variables or configuration file. Safely defaulting to local SQLite database provider.");
   return new SqliteProvider();
 }
 

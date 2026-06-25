@@ -135,6 +135,7 @@ export default function App() {
   const [remainingViews, setRemainingViews] = useState<number | null>(null);
   const [showInfo, setShowInfo] = useState(false);
   const [isDownloadingQR, setIsDownloadingQR] = useState(false);
+  const [dbType, setDbType] = useState<string | null>(null);
 
   const qrCodeRef = React.useRef<HTMLDivElement>(null);
 
@@ -147,6 +148,15 @@ export default function App() {
    */
   useEffect(() => {
     document.documentElement.classList.add('dark');
+    // Check server status & database provider type (Firestore vs SQLite fallback)
+    fetch('/api/health')
+      .then(res => res.json())
+      .then(data => {
+        if (data && data.database) {
+          setDbType(data.database);
+        }
+      })
+      .catch(() => {});
   }, []);
 
   /**
@@ -434,8 +444,26 @@ export default function App() {
     }
   };
 
+  const isCloudRunSqlite = dbType === 'sqlite' && 
+    !globalThis.location.hostname.includes('localhost') && 
+    !globalThis.location.hostname.includes('127.0.0.1');
+
   return (
     <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-slate-950 transition-colors duration-300">
+      {isCloudRunSqlite && (
+        <div className="w-full max-w-xl mb-6 p-5 rounded-2xl bg-amber-500/10 border border-amber-500/30 text-amber-200 text-sm flex gap-3 shadow-lg shadow-amber-950/20">
+          <AlertCircle className="w-5 h-5 text-amber-500 flex-shrink-0 mt-0.5" />
+          <div className="space-y-1">
+            <h4 className="font-bold text-amber-400">Database is running in Ephemeral Mode (SQLite fallback)</h4>
+            <p className="text-amber-200/80 leading-relaxed text-xs">
+              Your server is currently using local SQLite. On Cloud Run, local files are deleted automatically when the container sleeps (resulting in "Link Invalid" errors after 15-30 minutes of idle time).
+            </p>
+            <p className="text-amber-200/90 font-semibold text-xs pt-1">
+              👉 Please redeploy/publish the application to Cloud Run to load the persistent Firestore database.
+            </p>
+          </div>
+        </div>
+      )}
       <header className="mb-8 md:mb-12 text-center pt-4">
         <div className="flex items-center justify-center gap-3 mb-3">
           <div className="p-2 bg-indigo-600 rounded-xl md:rounded-2xl shadow-indigo-900/20 shadow-xl">
@@ -726,7 +754,7 @@ export default function App() {
                         <input
                           id="view-password-input"
                           type={showViewPassword ? "text" : "password"}
-                          viewValue={viewPassword}
+                          value={viewPassword}
                           onChange={(e) => setViewPassword(e.target.value)}
                           placeholder="Access password..."
                           className="w-full p-4 pr-14 rounded-2xl border border-slate-200 dark:border-slate-800 focus:ring-2 focus:ring-indigo-500 bg-white/50 dark:bg-slate-900/50 dark:text-white text-center text-lg"

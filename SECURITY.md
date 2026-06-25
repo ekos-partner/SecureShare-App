@@ -34,6 +34,5 @@ SecureShare is built on a Zero-Knowledge architecture:
 2.  **Key Isolation**: The decryption key is generated on the client and stored in the URL fragment (`#key`). The URL fragment is never sent to the server.
 3.  **Strong Key Derivation**: We use Argon2id (via `hash-wasm`) for deriving keys from optional passwords.
 4.  **Anti-Abuse**: We employ a cryptographic Proof of Work (PoW) system to prevent DoS attacks and spam.
-5.  **Pluggable storage**: Encrypted blobs are stored via SQLite (self-hosted) or Cloud Firestore (serverless). The server never stores decryption keys in either mode.
 
-For a detailed breakdown of our security model, please refer to the [Threat Model](THREAT_MODEL.md) and [Limitations](LIMITATIONS.md) documents. Deployment-specific guidance (including GCP/Firestore) is in [DEPLOYMENT.md](DEPLOYMENT.md).
+For a detailed breakdown of our security model, please refer to the [Threat Model](THREAT_MODEL.md) and [Limitations](LIMITATIONS.md) documents.

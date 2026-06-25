@@ -51,10 +51,16 @@ While the *content* of your secret is encrypted and unreadable by the server, ce
 
 This metadata cannot be used to decrypt the secret, but it could potentially be used for traffic analysis.
 
-## 6. Firestore Deployments (Operator Responsibility)
+## 6. Data Persistence & Deployment Misconfiguration
 
-If you deploy with the **Firestore** backend (typical on GCP Cloud Run):
+SecureShare secrets are stored server-side (encrypted). **If the database is wiped, links stop working** — this is not a crypto failure; the ciphertext is simply gone.
 
-*   **`firebase-applet-config.json`** contains a Firebase Web API key. Restrict that key in Google Cloud Console (HTTP referrers, API allowlists). Never commit this file to version control.
-*   **`firestore.rules`** in this repository must be deployed to your Firebase project. Operators are responsible for reviewing rules and Firebase project access — misconfiguration can expose collections to clients that possess the Web API key.
-*   **Logs**: Firestore event logging behavior differs from SQLite; see [DEPLOYMENT.md](./DEPLOYMENT.md) for setup expectations.
+| Deployment | Risk of lost links | Notes |
+| :--- | :--- | :--- |
+| **Docker + `./data` volume** | Low | Recommended self-hosted setup. Restarts are fine. |
+| **VPS / native with `DB_PATH` on disk** | Low | Same as Docker with a real disk path. |
+| **Docker without volume mount** | **High** | DB lives inside the container; gone when the container is removed. |
+| **Cloud Run / serverless with SQLite only** | **High** | Filesystem is ephemeral; use **Firestore** on GCP instead. |
+| **PaaS without persistent disk** | **High** | Attach a volume or expect data loss on each deploy. |
+
+**Mitigation:** Follow [DEPLOYMENT.md](./DEPLOYMENT.md). Self-hosters: always mount persistent storage. GCP Cloud Run: configure Firestore (`FIREBASE_CONFIG` or equivalent). The application may display an in-app warning when SQLite is detected on a non-local production host.

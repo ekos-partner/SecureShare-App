@@ -55,21 +55,22 @@ To prevent automated guessing and unauthorized access:
 
 ### 🗄️ Storage Backends
 
-SecureShare uses a **pluggable database layer** (`database-provider.ts`). The same application code runs against different backends depending on how you deploy it:
-
-| Backend | Best for | How it is selected |
+| Backend | When to use | Configuration |
 | :--- | :--- | :--- |
-| **SQLite** (default) | Self-hosted, Docker, VPS, local dev | No Firebase config, or `DATABASE_PROVIDER=sqlite` |
-| **Cloud Firestore** | Serverless (e.g. GCP Cloud Run), multi-instance without shared disk | Valid `firebase-applet-config.json` (real `projectId` / `apiKey`, no placeholders), or `DATABASE_PROVIDER=firestore` |
+| **SQLite** (default) | **Self-hosted**, Docker, VPS, dev, most PaaS with a disk | Nothing extra — or `DATABASE_PROVIDER=sqlite` |
+| **Cloud Firestore** | **GCP Cloud Run** (serverless) only | `FIREBASE_CONFIG` / `FIREBASE_*` env vars or gitignored `firebase-applet-config.json` |
 
-- **SQLite**: Stores encrypted blobs in `data/secrets.db` (configurable via `DB_PATH`). In containers with a GCS FUSE mount, the provider can mirror the DB file to persistent cloud storage.
-- **Firestore**: Stores secrets in a Firestore database; deploy with `firebase-blueprint.json` and `firestore.rules`. Keep `firebase-applet-config.json` **local only** (gitignored) — never commit it.
+- **Self-hosting?** Use **Docker + SQLite** — no Firebase account needed. See [DEPLOYMENT.md](./DEPLOYMENT.md).
+- **Cloud Run?** Use **Firestore** — SQLite inside the container is ephemeral and links expire after idle sleep.
 
-See [DEPLOYMENT.md](./DEPLOYMENT.md) for Docker and Cloud Run setup details.
+> **⚠️ Data persistence (read this before deploying)**  
+> - **Self-hosted SQLite is safe** when `secrets.db` lives on **persistent storage** (e.g. Docker volume `./data`, VPS disk). Links remain valid until they expire or hit view limits — **not** because the server restarts.  
+> - **Links become invalid early** only if the database file is **lost**: no volume mount, ephemeral PaaS disk, Cloud Run without Firestore, or deleting `data/secrets.db`.  
+> - The web UI shows a warning banner if it detects SQLite on a public host (typical misconfiguration on serverless).
 
 ### 🏛️ Architecture
 
-The application is designed with a security-first, zero-knowledge architecture. Storage is abstracted behind a single provider interface; only the backend changes between deployments.
+The application is designed with a security-first, zero-knowledge architecture. Self-hosted and GCP deployments share the same server code; only the storage backend differs.
 
 ```mermaid
 graph TD
@@ -81,8 +82,8 @@ graph TD
 
     subgraph "SecureShare Server (Node.js + Express)"
         E[Express Server] --> P[Database Provider];
-        P -->|default / sqlite| F[(SQLite)];
-        P -->|firebase config / firestore| G[(Cloud Firestore)];
+        P -->|"self-host (default)"| F[(SQLite file)];
+        P -->|"GCP Cloud Run"| G[(Cloud Firestore)];
     end
 
     D -->|2. Send Blob to Server| E;
@@ -131,7 +132,9 @@ The recommended way to run SecureShare on **any system** is using **Docker Compo
 docker compose up -d
 ```
 
-> **Tip**: With the default **SQLite** backend, Docker creates a `data` folder for `secrets.db`. For **Firestore**, mount or supply `firebase-applet-config.json` instead of relying on local disk persistence.
+> **Tip (self-hosted):** Docker + SQLite creates a `data/` folder with `secrets.db`. **No Firebase configuration is required.**
+
+For **GCP Cloud Run**, use Firestore instead — see [DEPLOYMENT.md](./DEPLOYMENT.md).
 
 #### Manual Docker Commands
 
@@ -178,7 +181,7 @@ SecureShare offers two ways to interact with the system, each designed for diffe
 ## 🛡️ Security Features Overview
 -   **AES-256-GCM Encryption**: Authenticated encryption using the native Web Crypto API.
 -   **Cryptographic Proof of Work (PoW)**: Hashcash-style Anti-DoS protection with replay prevention and strict TTL.
--   **Atomic Storage Operations**: Prevents race conditions during secret access and destruction (SQLite `IMMEDIATE` transactions or Firestore transactions).
+-   **Atomic Storage Operations**: Prevents race conditions (SQLite transactions or Firestore transactions).
 -   **Zero-Knowledge Architecture**: The server never sees the decryption key or plaintext data.
 
 ## 🛡️ Security by Design
@@ -195,7 +198,7 @@ A command-line interface (CLI) is provided for easy terminal-based sharing.
 ## 🛠️ Technology Stack
 - **Frontend**: React 19, Tailwind CSS 4, Motion.
 - **Backend**: Node.js (Express) with `helmet` and `express-rate-limit`.
-- **Database**: Pluggable — **SQLite** (default, self-hosted) or **Cloud Firestore** (serverless); selected via `database-provider.ts`, `DATABASE_PROVIDER`, or `firebase-applet-config.json`.
+- **Database**: **SQLite** by default (self-hosted). **Firestore** optional for GCP Cloud Run only.
 - **Encryption**: Web Crypto API (AES-256-GCM, SHA-256) and hash-wasm (Argon2id).
 
 ## 📋 Compliance & Standards

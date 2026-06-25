@@ -1,7 +1,7 @@
 {
   "name": "secureshare",
   "private": true,
-  "version": "4.1.2",
+  "version": "4.2.0",
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
@@ -19,7 +19,6 @@
     "clsx": "^2.1.1",
     "cors": "^2.8.6",
     "dotenv": "^17.2.3",
-    "ejs": "^5.0.1",
     "express": "^4.22.2",
     "express-rate-limit": "^8.2.2",
     "firebase": "^12.13.0",
@@ -43,7 +42,8 @@
       "path-to-regexp": "0.1.13"
     },
     "postcss": ">=8.5.10",
-    "picomatch": ">=4.0.4"
+    "picomatch": ">=4.0.4",
+    "qs": "^6.15.2"
   },
   "devDependencies": {
     "@tailwindcss/typography": "^0.5.19",
